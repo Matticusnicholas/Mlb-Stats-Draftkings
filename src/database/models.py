@@ -186,6 +186,12 @@ def create_database(db_path: str = "data/mlb_stats.db"):
     Args:
         db_path: Path to SQLite database file
     """
+    import os
+    # Create parent directory if it doesn't exist
+    db_dir = os.path.dirname(db_path)
+    if db_dir and not os.path.exists(db_dir):
+        os.makedirs(db_dir, exist_ok=True)
+
     engine = create_engine(f"sqlite:///{db_path}", echo=False)
     Base.metadata.create_all(engine)
     return engine
@@ -201,14 +207,18 @@ def get_session(db_path: str = "data/mlb_stats.db"):
     Returns:
         SQLAlchemy session
     """
+    import os
+    # Create parent directory if it doesn't exist
+    db_dir = os.path.dirname(db_path)
+    if db_dir and not os.path.exists(db_dir):
+        os.makedirs(db_dir, exist_ok=True)
+
     engine = create_engine(f"sqlite:///{db_path}", echo=False)
     Session = sessionmaker(bind=engine)
     return Session()
 
 
 if __name__ == "__main__":
-    # Create database
-    import os
-    os.makedirs("data", exist_ok=True)
+    # Create database (directory is created automatically)
     engine = create_database()
     print("Database created successfully!")

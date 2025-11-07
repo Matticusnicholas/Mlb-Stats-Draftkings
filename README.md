@@ -79,10 +79,7 @@ cd Mlb-Stats-Draftkings
 pip install -r requirements.txt
 ```
 
-3. Create data directory:
-```bash
-mkdir -p data
-```
+**Note:** The `data` directory will be created automatically when you first run the scripts.
 
 ### Usage Workflow
 
