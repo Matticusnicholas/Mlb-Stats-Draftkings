@@ -302,11 +302,13 @@ class DatabaseManager:
                         setattr(volatility, key, value)
                 volatility.last_updated = datetime.utcnow()
             else:
-                # Create new
+                # Create new - remove stats_type from metrics to avoid duplicate
+                metrics_copy = metrics.copy()
+                metrics_copy.pop('stats_type', None)  # Remove if exists
                 volatility = PlayerVolatility(
                     player_id=player_id,
                     stats_type=stats_type,
-                    **metrics
+                    **metrics_copy
                 )
                 session.add(volatility)
 
