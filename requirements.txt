@@ -1,0 +1,21 @@
+# Core dependencies
+requests>=2.31.0
+pandas>=2.1.0
+numpy>=1.24.0
+scipy>=1.11.0
+
+# Database
+sqlalchemy>=2.0.0
+
+# Visualization
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# GUI
+customtkinter>=5.2.0
+
+# Progress bars and utilities
+tqdm>=4.66.0
+
+# Date handling
+python-dateutil>=2.8.0
