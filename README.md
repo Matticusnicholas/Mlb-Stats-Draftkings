@@ -1,8 +1,20 @@
 # MLB DraftKings Volatility Analyzer
 
-A comprehensive tool for analyzing MLB player volatility and building high-variance DraftKings lineups for tournament play. This system fetches 2025 MLB season data, converts box score statistics into DraftKings points, and provides advanced volatility metrics to identify players with the highest spike potential.
+A comprehensive tool for analyzing MLB player volatility for **DraftKings Best Ball** snake drafts. This system fetches 2025 MLB season data, converts box score statistics into DraftKings points, and provides advanced volatility metrics optimized for best ball formats using rolling 7-day windows.
+
+**Perfect for:** Best ball snake drafts where you need players who go on multi-game tears and have monster weekly ceilings.
 
 ## 🎯 Features
+
+### Best Ball Weekly Analysis (NEW!)
+Optimized for DraftKings Best Ball where your best scores auto-count each week:
+
+- **Rolling 7-day windows** - Analyzes all possible 7-day periods, not fixed weeks
+- **TEAR metrics** - Identifies players who go on 2, 3, 4, or 5+ game hot streaks
+- **Best week ceiling** - Finds players with the highest 7-day rolling totals
+- **Boom week rate** - How often players have elite 7-day periods
+- **Top weeks concentration** - Players whose points come from spike weeks (perfect for best ball!)
+- **Best Ball Score** - Composite metric (0-100) optimized for weekly formats
 
 ### Data Collection
 - Fetches complete 2025 MLB regular season schedule
@@ -104,11 +116,33 @@ This will:
 - Calculate DraftKings points for all players
 - Store everything in `data/mlb_stats.db`
 
-**Note:** Fetching all box scores for a full season takes several hours due to API rate limiting. Start with `--limit 100` for testing.
+**Note:** Fetching all box scores takes 5-10 minutes for the full season.
 
-#### Step 2: Analyze Volatility
+#### Step 2: Best Ball Analysis (Recommended for Snake Drafts)
 
-Once you have data, analyze player volatility:
+Analyze players using rolling 7-day windows for best ball:
+
+```bash
+# Get top 50 best ball hitters
+python analyze_bestball.py --stats-type batting --min-games 20 --top-n 50
+
+# Get top 25 best ball pitchers
+python analyze_bestball.py --stats-type pitching --min-games 10 --top-n 25
+
+# Detailed breakdown for specific player
+python analyze_bestball.py --player-id 660271 --stats-type batting
+```
+
+This will show:
+- **Best Ball Score** - Composite weekly performance metric
+- **Best Week** - Highest 7-day rolling window DK points
+- **Top 3 Weeks Average** - Typical ceiling weeks
+- **Boom Week Rate** - % of elite 7-day periods
+- **TEAR Metrics** - Multi-game hot streak rates (TEAR3, TEAR4, etc.)
+
+#### Step 3: Daily Game Volatility Analysis (Optional)
+
+For general volatility analysis (game-by-game):
 
 ```bash
 # Analyze batting volatility
@@ -145,6 +179,43 @@ The GUI allows you to:
 - Export lineups for DraftKings
 
 ## 📊 Understanding the Metrics
+
+### Best Ball Metrics (Rolling 7-Day Windows)
+
+#### Best Ball Score (0-100)
+Composite metric optimized for DraftKings Best Ball formats. Higher = better for weekly scoring.
+
+**Components:**
+- Best week ever (25% weight) - Highest 7-day rolling total
+- Top 3 weeks average (20% weight) - Typical ceiling weeks
+- Boom week rate (20% weight) - % of weeks in 90th percentile+
+- TEAR3+ rate (20% weight) - Multi-game hot streak ability
+- Top 5 concentration (15% weight) - % of points from best weeks
+
+#### TEAR Metrics
+Measures likelihood of going on multi-game hot streaks:
+
+- **TEAR2**: Rate of 2+ consecutive hot games (per 100 games)
+- **TEAR3**: Rate of 3+ consecutive hot games (per 100 games)
+- **TEAR4**: Rate of 4+ consecutive hot games (per 100 games)
+- **TEAR5**: Rate of 5+ consecutive hot games (per 100 games)
+
+A "hot game" is defined as 75th percentile or better for that player.
+
+**Why it matters for Best Ball:** When a player goes on a tear, multiple hot games cluster in the same week, creating monster weekly totals that auto-start.
+
+#### Best Week
+The highest 7-day rolling window DK points total. This is the player's absolute ceiling week.
+
+#### Top 3/5 Weeks Average
+Average DK points of the player's top 3 or 5 rolling 7-day windows. Shows typical ceiling performance.
+
+#### Boom Week Rate
+Percentage of 7-day windows in the 90th percentile or better. High boom rate = consistent elite weeks.
+
+---
+
+### Daily Game Metrics (Optional - Less relevant for Best Ball)
 
 ### Variance Score (0-100)
 Composite metric combining multiple volatility indicators. Higher = more volatile/better for tournaments.
@@ -188,7 +259,8 @@ Mlb-Stats-Draftkings/
 │   │   ├── models.py           # Database schema
 │   │   └── db_manager.py       # Database operations
 │   ├── analytics/
-│   │   ├── volatility_analyzer.py   # Volatility calculations
+│   │   ├── weekly_analyzer.py       # Best Ball weekly analysis (TEAR metrics)
+│   │   ├── volatility_analyzer.py   # Daily game volatility calculations
 │   │   └── roster_optimizer.py      # Lineup optimization
 │   ├── utils/
 │   │   ├── dk_calculator.py    # DK points calculator
@@ -196,7 +268,8 @@ Mlb-Stats-Draftkings/
 │   └── gui/
 │       └── main_window.py      # GUI application
 ├── fetch_data.py               # Data fetching script
-├── analyze_volatility.py       # Analysis script
+├── analyze_bestball.py         # Best Ball analysis (rolling 7-day windows)
+├── analyze_volatility.py       # Daily volatility analysis
 ├── run_gui.py                  # GUI launcher
 ├── requirements.txt            # Python dependencies
 └── README.md                   # This file
@@ -237,33 +310,35 @@ Edit `config/dk_scoring.json` to adjust scoring rules:
 }
 ```
 
-## 📈 Example Analysis Workflow
+## 📈 Example Best Ball Workflow
 
 ```bash
-# 1. Fetch first 500 games for testing
-python fetch_data.py --season 2025 --limit 500
+# 1. Fetch all 2025 data (takes 5-10 minutes)
+python fetch_data.py --season 2025
 
-# 2. Analyze batting volatility
-python analyze_volatility.py --stats-type batting --min-games 15 --top-n 100
+# 2. Analyze best ball hitters (rolling 7-day windows)
+python analyze_bestball.py --stats-type batting --min-games 20 --top-n 50
 
-# 3. Build sample roster with high-variance players
-python analyze_volatility.py --skip-analysis --build-roster --min-variance 30
+# 3. Analyze best ball pitchers
+python analyze_bestball.py --stats-type pitching --min-games 10 --top-n 25
 
-# 4. Launch GUI for interactive analysis
-python run_gui.py
+# 4. Deep dive on specific player
+python analyze_bestball.py --player-id 660271 --stats-type batting
 ```
 
-## 💡 Tips for Tournament Play
+## 💡 Tips for Best Ball Snake Drafts
 
-1. **High Variance is Key**: In large-field GPPs, you need differentiation. High variance players give you spike weeks that others miss.
+1. **Prioritize Weekly Ceilings**: Ignore bust rate completely - bad games don't count in best ball. Focus on Best Week and Top 3 Weeks Average.
 
-2. **Balance Ceiling and Floor**: While variance is important, players who are too bust-prone hurt your chances. Look for boom rate > 15% and bust rate < 30%.
+2. **TEAR Metrics Are Gold**: Players with high TEAR3/TEAR4 rates go on hot streaks where multiple games cluster in the same week = monster weekly totals.
 
-3. **Stack Correlated Players**: When one team's hitters spike, multiple players spike together. The correlation analysis helps identify stacking opportunities.
+3. **Top Weeks Concentration**: Look for players with 30%+ of points from top 5 weeks. These spike-y players are perfect for best ball.
 
-4. **Recent Form Matters**: Use the last 7/14 day metrics to identify players entering hot streaks.
+4. **Best Ball Score > 60**: Target players with Best Ball Score above 60 for your core roster. These have proven weekly upside.
 
-5. **Diversity in Multi-Entry**: If building multiple lineups, ensure sufficient uniqueness between rosters.
+5. **Volume Matters**: Players with more games per week (everyday players vs. platoon) have higher weekly ceilings just from volume.
+
+6. **Pitchers**: For SP, look for pitchers with dominant individual starts (can win a week solo). TEAR metrics show back-to-back dominant performances.
 
 ## 🔍 Advanced Usage
 
