@@ -370,7 +370,8 @@ class WeeklyAnalyzer:
         self,
         stats_type: str = "batting",
         min_games: int = 20,
-        limit: int = 50
+        limit: int = 50,
+        progress_callback=None
     ) -> List[Dict]:
         """
         Get top players for best ball based on weekly analysis.
@@ -379,6 +380,7 @@ class WeeklyAnalyzer:
             stats_type: 'batting' or 'pitching'
             min_games: Minimum games required
             limit: Number of players to return
+            progress_callback: Optional callback function(current, total, player_name)
 
         Returns:
             List of player dictionaries with weekly metrics
@@ -400,16 +402,46 @@ class WeeklyAnalyzer:
             ).all()
 
             player_ids = [pid[0] for pid in player_ids]
+            total_players = len(player_ids)
+
+            # Limit calculation to reasonable number for performance
+            # If too many players, sample or limit
+            if total_players > 300:
+                logger.info(f"Found {total_players} players, limiting to top 300 for performance")
+                # Get players with most games first (likely to be better)
+                player_game_counts = session.query(
+                    PlayerGame.player_id,
+                    func.count(PlayerGame.id).label('game_count')
+                ).filter_by(
+                    stats_type=stats_type
+                ).group_by(
+                    PlayerGame.player_id
+                ).having(
+                    func.count(PlayerGame.id) >= min_games
+                ).order_by(
+                    func.count(PlayerGame.id).desc()
+                ).limit(300).all()
+
+                player_ids = [pid for pid, count in player_game_counts]
+                total_players = len(player_ids)
+
+            logger.info(f"Calculating Best Ball metrics for {total_players} players...")
 
             # Calculate weekly metrics for each
             player_scores = []
 
-            for player_id in player_ids:
+            for idx, player_id in enumerate(player_ids, 1):
                 try:
+                    if progress_callback:
+                        player = session.query(Player).filter_by(player_id=player_id).first()
+                        player_name = player.player_name if player else str(player_id)
+                        progress_callback(idx, total_players, player_name)
+
                     metrics = self.calculate_weekly_volatility(player_id, stats_type, min_games)
 
                     if metrics and metrics['bestball_score'] > 0:
-                        player = session.query(Player).filter_by(player_id=player_id).first()
+                        if not progress_callback:  # Only query if we haven't already
+                            player = session.query(Player).filter_by(player_id=player_id).first()
 
                         if player:
                             player_scores.append({

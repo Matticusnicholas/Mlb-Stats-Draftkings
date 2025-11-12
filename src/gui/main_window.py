@@ -5,6 +5,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from typing import List, Dict, Optional
 import logging
+import threading
 
 try:
     import customtkinter as ctk
@@ -381,81 +382,155 @@ class MLBVolatilityGUI:
 
     def _load_player_pool(self):
         """Load player pool based on mode and filters."""
-        self.status_var.set("Loading player pool...")
-        self.root.update()
+        stats_type = self.stats_type_var.get()
+        min_games = self.min_games_var.get()
+        min_threshold = self.min_threshold_var.get()
+        sort_by = self.sort_by_var.get()
 
+        # Clear existing items
+        for item in self.player_tree.get_children():
+            self.player_tree.delete(item)
+
+        if self.analysis_mode == "bestball":
+            # Use threading for Best Ball (computationally intensive)
+            self._load_bestball_threaded(stats_type, min_games, min_threshold, sort_by)
+        else:
+            # Daily mode is fast enough to run directly
+            self._load_daily_pool(stats_type, min_games, min_threshold, sort_by)
+
+    def _load_daily_pool(self, stats_type, min_games, min_threshold, sort_by):
+        """Load daily volatility players (fast, no threading needed)."""
         try:
-            stats_type = self.stats_type_var.get()
-            min_games = self.min_games_var.get()
-            min_threshold = self.min_threshold_var.get()
-            sort_by = self.sort_by_var.get()
+            self.status_var.set("Loading daily volatility players...")
+            self.root.update()
 
-            # Clear existing items
-            for item in self.player_tree.get_children():
-                self.player_tree.delete(item)
+            # Load daily volatility players
+            self.current_player_pool = self.optimizer.get_player_pool(
+                stats_type=stats_type,
+                min_games=min_games,
+                min_variance_score=min_threshold
+            )
 
-            if self.analysis_mode == "bestball":
-                # Load Best Ball players
-                self.current_player_pool = self.weekly_analyzer.get_top_bestball_players(
-                    stats_type=stats_type,
-                    min_games=min_games,
-                    limit=500  # Load more for filtering
-                )
+            # Sort
+            self.current_player_pool.sort(key=lambda x: x.get(sort_by, 0), reverse=True)
 
-                # Filter by threshold
-                self.current_player_pool = [
-                    p for p in self.current_player_pool
-                    if p.get('bestball_score', 0) >= min_threshold
-                ]
+            # Populate tree
+            for player in self.current_player_pool:
+                self.player_tree.insert("", tk.END, values=(
+                    player['player_name'],
+                    player['games_played'],
+                    f"{player['mean_points']:.1f}",
+                    f"{player['std_dev']:.1f}",
+                    f"{player['variance_score']:.1f}",
+                    f"{player['upside_score']:.1f}",
+                    f"{player['max_points']:.1f}",
+                    f"{player['boom_rate']:.1f}"
+                ))
 
-                # Sort
-                self.current_player_pool.sort(key=lambda x: x.get(sort_by, 0), reverse=True)
-
-                # Populate tree
-                for player in self.current_player_pool:
-                    self.player_tree.insert("", tk.END, values=(
-                        player['player_name'],
-                        f"{player['bestball_score']:.1f}",
-                        f"{player['best_week']:.1f}",
-                        f"{player['top3_weeks_avg']:.1f}",
-                        f"{player['boom_week_rate']:.1f}",
-                        f"{player['tear3_rate']:.1f}",
-                        f"{player['tear4_rate']:.1f}",
-                        f"{player['longest_tear']}"
-                    ))
-
-                self.status_var.set(f"Loaded {len(self.current_player_pool)} Best Ball players")
-
-            else:  # daily mode
-                # Load daily volatility players
-                self.current_player_pool = self.optimizer.get_player_pool(
-                    stats_type=stats_type,
-                    min_games=min_games,
-                    min_variance_score=min_threshold
-                )
-
-                # Sort
-                self.current_player_pool.sort(key=lambda x: x.get(sort_by, 0), reverse=True)
-
-                # Populate tree
-                for player in self.current_player_pool:
-                    self.player_tree.insert("", tk.END, values=(
-                        player['player_name'],
-                        player['games_played'],
-                        f"{player['mean_points']:.1f}",
-                        f"{player['std_dev']:.1f}",
-                        f"{player['variance_score']:.1f}",
-                        f"{player['upside_score']:.1f}",
-                        f"{player['max_points']:.1f}",
-                        f"{player['boom_rate']:.1f}"
-                    ))
-
-                self.status_var.set(f"Loaded {len(self.current_player_pool)} players")
+            self.status_var.set(f"Loaded {len(self.current_player_pool)} players")
 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to load player pool: {e}")
             self.status_var.set("Error loading players")
             logger.error(f"Error loading player pool: {e}")
+
+    def _load_bestball_threaded(self, stats_type, min_games, min_threshold, sort_by):
+        """Load Best Ball players in background thread with progress dialog."""
+        # Create progress dialog
+        progress_win = tk.Toplevel(self.root)
+        progress_win.title("Loading Best Ball Players")
+        progress_win.geometry("400x150")
+        progress_win.resizable(False, False)
+
+        # Center the window
+        progress_win.transient(self.root)
+        progress_win.grab_set()
+
+        ttk.Label(progress_win, text="Calculating Best Ball metrics...", font=("Arial", 11)).pack(pady=10)
+
+        self.progress_var = tk.StringVar(value="Starting...")
+        progress_label = ttk.Label(progress_win, textvariable=self.progress_var)
+        progress_label.pack(pady=5)
+
+        self.progress_bar = ttk.Progressbar(progress_win, mode='determinate', length=350)
+        self.progress_bar.pack(pady=10)
+
+        cancel_btn = ttk.Button(progress_win, text="Cancel", command=lambda: setattr(self, 'cancel_loading', True))
+        cancel_btn.pack(pady=5)
+
+        self.cancel_loading = False
+
+        def progress_callback(current, total, player_name):
+            """Update progress from background thread."""
+            if self.cancel_loading:
+                return
+
+            percent = (current / total) * 100
+            self.root.after(0, lambda: self.progress_bar.configure(value=percent))
+            self.root.after(0, lambda: self.progress_var.set(f"Processing {current}/{total}: {player_name}"))
+
+        def load_in_background():
+            """Background thread function."""
+            try:
+                # Load Best Ball players with progress callback
+                player_pool = self.weekly_analyzer.get_top_bestball_players(
+                    stats_type=stats_type,
+                    min_games=min_games,
+                    limit=500,
+                    progress_callback=progress_callback
+                )
+
+                if self.cancel_loading:
+                    self.root.after(0, lambda: self.status_var.set("Loading cancelled"))
+                    self.root.after(0, progress_win.destroy)
+                    return
+
+                # Filter by threshold
+                player_pool = [
+                    p for p in player_pool
+                    if p.get('bestball_score', 0) >= min_threshold
+                ]
+
+                # Sort
+                player_pool.sort(key=lambda x: x.get(sort_by, 0), reverse=True)
+
+                # Update GUI in main thread
+                def update_gui():
+                    try:
+                        self.current_player_pool = player_pool
+
+                        # Populate tree
+                        for player in self.current_player_pool:
+                            self.player_tree.insert("", tk.END, values=(
+                                player['player_name'],
+                                f"{player['bestball_score']:.1f}",
+                                f"{player['best_week']:.1f}",
+                                f"{player['top3_weeks_avg']:.1f}",
+                                f"{player['boom_week_rate']:.1f}",
+                                f"{player['tear3_rate']:.1f}",
+                                f"{player['tear4_rate']:.1f}",
+                                f"{player['longest_tear']}"
+                            ))
+
+                        self.status_var.set(f"Loaded {len(self.current_player_pool)} Best Ball players")
+                        progress_win.destroy()
+
+                    except Exception as e:
+                        logger.error(f"Error updating GUI: {e}")
+                        progress_win.destroy()
+                        messagebox.showerror("Error", f"Failed to update display: {e}")
+
+                self.root.after(0, update_gui)
+
+            except Exception as e:
+                logger.error(f"Error in background thread: {e}")
+                self.root.after(0, progress_win.destroy)
+                self.root.after(0, lambda: messagebox.showerror("Error", f"Failed to load Best Ball players: {e}"))
+                self.root.after(0, lambda: self.status_var.set("Error loading players"))
+
+        # Start background thread
+        thread = threading.Thread(target=load_in_background, daemon=True)
+        thread.start()
 
     def _show_player_details(self, event):
         """Show detailed player statistics."""
