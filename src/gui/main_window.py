@@ -1,5 +1,5 @@
 """
-Main GUI window for MLB DraftKings Volatility Analyzer.
+Main GUI window for MLB DraftKings Volatility Analyzer with Best Ball support.
 """
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -15,13 +15,14 @@ except ImportError:
 
 from ..database.db_manager import DatabaseManager
 from ..analytics.volatility_analyzer import VolatilityAnalyzer
+from ..analytics.weekly_analyzer import WeeklyAnalyzer
 from ..analytics.roster_optimizer import RosterOptimizer
 
 logger = logging.getLogger(__name__)
 
 
 class MLBVolatilityGUI:
-    """Main GUI application for MLB volatility analysis."""
+    """Main GUI application for MLB volatility analysis with Best Ball support."""
 
     def __init__(self, db_path: str = "data/mlb_stats.db"):
         """
@@ -32,6 +33,7 @@ class MLBVolatilityGUI:
         """
         self.db = DatabaseManager(db_path)
         self.analyzer = VolatilityAnalyzer(self.db)
+        self.weekly_analyzer = WeeklyAnalyzer(self.db)
         self.optimizer = RosterOptimizer(self.db)
 
         # Use customtkinter if available, else standard tkinter
@@ -42,11 +44,12 @@ class MLBVolatilityGUI:
         else:
             self.root = tk.Tk()
 
-        self.root.title("MLB DraftKings Volatility Analyzer")
-        self.root.geometry("1200x800")
+        self.root.title("MLB DraftKings Best Ball Analyzer")
+        self.root.geometry("1400x850")
 
         self.current_player_pool = []
         self.current_roster = None
+        self.analysis_mode = "bestball"  # "bestball" or "daily"
 
         self._create_widgets()
 
@@ -64,7 +67,7 @@ class MLBVolatilityGUI:
         # Title
         title_label = ttk.Label(
             main_container,
-            text="MLB DraftKings Volatility Analyzer",
+            text="MLB DraftKings Best Ball Analyzer",
             font=("Arial", 18, "bold")
         )
         title_label.grid(row=0, column=0, columnspan=2, pady=10)
@@ -86,7 +89,7 @@ class MLBVolatilityGUI:
         self._create_roster_panel(right_panel)
 
         # Status bar
-        self.status_var = tk.StringVar(value="Ready")
+        self.status_var = tk.StringVar(value="Ready - Best Ball Mode (Rolling 7-Day Windows)")
         status_bar = ttk.Label(
             main_container,
             textvariable=self.status_var,
@@ -98,6 +101,39 @@ class MLBVolatilityGUI:
     def _create_filters(self, parent):
         """Create filter controls."""
         row = 0
+
+        # Analysis Mode Selector
+        ttk.Label(parent, text="Analysis Mode:", font=("Arial", 11, "bold")).grid(
+            row=row, column=0, sticky=tk.W, pady=5
+        )
+        row += 1
+
+        self.mode_var = tk.StringVar(value="bestball")
+        mode_frame = ttk.Frame(parent)
+        mode_frame.grid(row=row, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+
+        ttk.Radiobutton(
+            mode_frame,
+            text="Best Ball (Weekly)",
+            variable=self.mode_var,
+            value="bestball",
+            command=self._on_mode_change
+        ).pack(side=tk.LEFT, padx=5)
+
+        ttk.Radiobutton(
+            mode_frame,
+            text="Daily Volatility",
+            variable=self.mode_var,
+            value="daily",
+            command=self._on_mode_change
+        ).pack(side=tk.LEFT, padx=5)
+        row += 1
+
+        # Separator
+        ttk.Separator(parent, orient=tk.HORIZONTAL).grid(
+            row=row, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=10
+        )
+        row += 1
 
         # Stats type
         ttk.Label(parent, text="Position Type:").grid(row=row, column=0, sticky=tk.W, pady=5)
@@ -119,40 +155,41 @@ class MLBVolatilityGUI:
         min_games_spin.grid(row=row, column=1, sticky=(tk.W, tk.E), pady=5)
         row += 1
 
-        # Min variance score
-        ttk.Label(parent, text="Min Variance Score:").grid(row=row, column=0, sticky=tk.W, pady=5)
-        self.min_variance_var = tk.DoubleVar(value=0.0)
-        variance_spin = ttk.Spinbox(
+        # Min threshold score (changes based on mode)
+        self.threshold_label = ttk.Label(parent, text="Min BB Score:")
+        self.threshold_label.grid(row=row, column=0, sticky=tk.W, pady=5)
+        self.min_threshold_var = tk.DoubleVar(value=0.0)
+        threshold_spin = ttk.Spinbox(
             parent,
             from_=0.0,
             to=100.0,
             increment=5.0,
-            textvariable=self.min_variance_var,
+            textvariable=self.min_threshold_var,
             width=15
         )
-        variance_spin.grid(row=row, column=1, sticky=(tk.W, tk.E), pady=5)
+        threshold_spin.grid(row=row, column=1, sticky=(tk.W, tk.E), pady=5)
         row += 1
 
-        # Sort by
+        # Sort by (changes based on mode)
         ttk.Label(parent, text="Sort By:").grid(row=row, column=0, sticky=tk.W, pady=5)
-        self.sort_by_var = tk.StringVar(value="variance_score")
-        sort_combo = ttk.Combobox(
+        self.sort_by_var = tk.StringVar(value="bestball_score")
+        self.sort_combo = ttk.Combobox(
             parent,
             textvariable=self.sort_by_var,
-            values=["variance_score", "upside_score", "mean_points", "max_points", "boom_rate"],
+            values=["bestball_score", "best_week", "tear3_rate", "tear4_rate", "boom_week_rate"],
             state="readonly",
             width=15
         )
-        sort_combo.grid(row=row, column=1, sticky=(tk.W, tk.E), pady=5)
+        self.sort_combo.grid(row=row, column=1, sticky=(tk.W, tk.E), pady=5)
         row += 1
 
         # Load players button
-        load_btn = ttk.Button(
+        self.load_btn = ttk.Button(
             parent,
-            text="Load Player Pool",
+            text="Load Best Ball Players",
             command=self._load_player_pool
         )
-        load_btn.grid(row=row, column=0, columnspan=2, pady=10, sticky=(tk.W, tk.E))
+        self.load_btn.grid(row=row, column=0, columnspan=2, pady=10, sticky=(tk.W, tk.E))
         row += 1
 
         # Separator
@@ -161,32 +198,14 @@ class MLBVolatilityGUI:
         )
         row += 1
 
-        # Roster building
-        ttk.Label(parent, text="Roster Building", font=("Arial", 12, "bold")).grid(
-            row=row, column=0, columnspan=2, pady=5
-        )
-        row += 1
-
-        # Optimization metric
-        ttk.Label(parent, text="Optimize For:").grid(row=row, column=0, sticky=tk.W, pady=5)
-        self.opt_metric_var = tk.StringVar(value="variance_score")
-        opt_combo = ttk.Combobox(
+        # Info section
+        self.info_label = ttk.Label(
             parent,
-            textvariable=self.opt_metric_var,
-            values=["variance_score", "upside_score"],
-            state="readonly",
-            width=15
+            text="Best Ball Mode:\n• Rolling 7-day windows\n• TEAR metrics\n• Weekly ceilings",
+            font=("Arial", 9),
+            justify=tk.LEFT
         )
-        opt_combo.grid(row=row, column=1, sticky=(tk.W, tk.E), pady=5)
-        row += 1
-
-        # Build roster button
-        build_btn = ttk.Button(
-            parent,
-            text="Build Max Variance Roster",
-            command=self._build_roster
-        )
-        build_btn.grid(row=row, column=0, columnspan=2, pady=10, sticky=(tk.W, tk.E))
+        self.info_label.grid(row=row, column=0, columnspan=2, pady=5, sticky=tk.W)
         row += 1
 
         # Separator
@@ -209,18 +228,88 @@ class MLBVolatilityGUI:
         db_stats_btn.grid(row=row, column=0, columnspan=2, pady=5, sticky=(tk.W, tk.E))
         row += 1
 
-    def _create_player_list(self, parent):
-        """Create player list view."""
-        player_frame = ttk.LabelFrame(parent, text="Player Pool", padding="5")
-        player_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 5))
-        player_frame.rowconfigure(0, weight=1)
-        player_frame.columnconfigure(0, weight=1)
+    def _on_mode_change(self):
+        """Handle analysis mode change."""
+        self.analysis_mode = self.mode_var.get()
 
-        # Create treeview
-        columns = ("Name", "Games", "Mean", "Std Dev", "Variance", "Upside", "Max", "Boom%")
-        self.player_tree = ttk.Treeview(player_frame, columns=columns, show="headings", height=15)
+        if self.analysis_mode == "bestball":
+            self.threshold_label.config(text="Min BB Score:")
+            self.sort_combo.configure(values=[
+                "bestball_score", "best_week", "tear3_rate", "tear4_rate", "boom_week_rate", "top3_weeks_avg"
+            ])
+            self.sort_by_var.set("bestball_score")
+            self.load_btn.config(text="Load Best Ball Players")
+            self.info_label.config(
+                text="Best Ball Mode:\n• Rolling 7-day windows\n• TEAR metrics\n• Weekly ceilings"
+            )
+            self.status_var.set("Best Ball Mode (Rolling 7-Day Windows)")
 
-        # Define headings
+            # Update tree columns for Best Ball
+            self._update_tree_columns_bestball()
+
+        else:  # daily mode
+            self.threshold_label.config(text="Min Variance Score:")
+            self.sort_combo.configure(values=[
+                "variance_score", "upside_score", "mean_points", "max_points", "boom_rate"
+            ])
+            self.sort_by_var.set("variance_score")
+            self.load_btn.config(text="Load Player Pool")
+            self.info_label.config(
+                text="Daily Mode:\n• Game-by-game analysis\n• Standard deviation\n• Spike rates"
+            )
+            self.status_var.set("Daily Volatility Mode")
+
+            # Update tree columns for Daily
+            self._update_tree_columns_daily()
+
+        # Clear current player pool
+        self.current_player_pool = []
+        for item in self.player_tree.get_children():
+            self.player_tree.delete(item)
+
+    def _update_tree_columns_bestball(self):
+        """Update tree columns for Best Ball mode."""
+        # Clear existing
+        for item in self.player_tree.get_children():
+            self.player_tree.delete(item)
+
+        # Reconfigure columns
+        self.player_tree.configure(columns=(
+            "Name", "BB Score", "Best Week", "Top3 Avg", "Boom%", "TEAR3", "TEAR4", "Longest"
+        ))
+
+        # Set headings
+        self.player_tree.heading("Name", text="Player Name")
+        self.player_tree.heading("BB Score", text="BB Score")
+        self.player_tree.heading("Best Week", text="Best Week")
+        self.player_tree.heading("Top3 Avg", text="Top3 Avg")
+        self.player_tree.heading("Boom%", text="Boom%")
+        self.player_tree.heading("TEAR3", text="TEAR3")
+        self.player_tree.heading("TEAR4", text="TEAR4")
+        self.player_tree.heading("Longest", text="Longest")
+
+        # Set column widths
+        self.player_tree.column("Name", width=150)
+        self.player_tree.column("BB Score", width=80)
+        self.player_tree.column("Best Week", width=90)
+        self.player_tree.column("Top3 Avg", width=90)
+        self.player_tree.column("Boom%", width=70)
+        self.player_tree.column("TEAR3", width=70)
+        self.player_tree.column("TEAR4", width=70)
+        self.player_tree.column("Longest", width=70)
+
+    def _update_tree_columns_daily(self):
+        """Update tree columns for Daily mode."""
+        # Clear existing
+        for item in self.player_tree.get_children():
+            self.player_tree.delete(item)
+
+        # Reconfigure columns
+        self.player_tree.configure(columns=(
+            "Name", "Games", "Mean", "Std Dev", "Variance", "Upside", "Max", "Boom%"
+        ))
+
+        # Set headings
         self.player_tree.heading("Name", text="Player Name")
         self.player_tree.heading("Games", text="Games")
         self.player_tree.heading("Mean", text="Mean Pts")
@@ -230,7 +319,7 @@ class MLBVolatilityGUI:
         self.player_tree.heading("Max", text="Max Pts")
         self.player_tree.heading("Boom%", text="Boom %")
 
-        # Define column widths
+        # Set column widths
         self.player_tree.column("Name", width=150)
         self.player_tree.column("Games", width=60)
         self.player_tree.column("Mean", width=70)
@@ -239,6 +328,19 @@ class MLBVolatilityGUI:
         self.player_tree.column("Upside", width=70)
         self.player_tree.column("Max", width=70)
         self.player_tree.column("Boom%", width=70)
+
+    def _create_player_list(self, parent):
+        """Create player list view."""
+        player_frame = ttk.LabelFrame(parent, text="Player Pool", padding="5")
+        player_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 5))
+        player_frame.rowconfigure(0, weight=1)
+        player_frame.columnconfigure(0, weight=1)
+
+        # Create treeview (will be configured based on mode)
+        self.player_tree = ttk.Treeview(player_frame, show="headings", height=15)
+
+        # Initial setup for Best Ball mode
+        self._update_tree_columns_bestball()
 
         # Scrollbar
         scrollbar = ttk.Scrollbar(player_frame, orient=tk.VERTICAL, command=self.player_tree.yview)
@@ -252,13 +354,13 @@ class MLBVolatilityGUI:
 
     def _create_roster_panel(self, parent):
         """Create roster display panel."""
-        roster_frame = ttk.LabelFrame(parent, text="Current Roster", padding="5")
+        roster_frame = ttk.LabelFrame(parent, text="Player Details / Analysis", padding="5")
         roster_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         roster_frame.rowconfigure(0, weight=1)
         roster_frame.columnconfigure(0, weight=1)
 
         # Roster text widget
-        self.roster_text = tk.Text(roster_frame, height=15, wrap=tk.WORD)
+        self.roster_text = tk.Text(roster_frame, height=15, wrap=tk.WORD, font=("Courier", 9))
         roster_scrollbar = ttk.Scrollbar(
             roster_frame,
             orient=tk.VERTICAL,
@@ -272,153 +374,88 @@ class MLBVolatilityGUI:
         # Export button
         export_btn = ttk.Button(
             roster_frame,
-            text="Export Roster",
-            command=self._export_roster
+            text="Export to CSV",
+            command=self._export_data
         )
         export_btn.grid(row=1, column=0, columnspan=2, pady=5)
 
     def _load_player_pool(self):
-        """Load player pool based on filters."""
+        """Load player pool based on mode and filters."""
         self.status_var.set("Loading player pool...")
         self.root.update()
 
         try:
             stats_type = self.stats_type_var.get()
             min_games = self.min_games_var.get()
-            min_variance = self.min_variance_var.get()
+            min_threshold = self.min_threshold_var.get()
             sort_by = self.sort_by_var.get()
-
-            self.current_player_pool = self.optimizer.get_player_pool(
-                stats_type=stats_type,
-                min_games=min_games,
-                min_variance_score=min_variance
-            )
-
-            # Sort
-            self.current_player_pool.sort(key=lambda x: x.get(sort_by, 0), reverse=True)
 
             # Clear existing items
             for item in self.player_tree.get_children():
                 self.player_tree.delete(item)
 
-            # Populate tree
-            for player in self.current_player_pool:
-                self.player_tree.insert("", tk.END, values=(
-                    player['player_name'],
-                    player['games_played'],
-                    f"{player['mean_points']:.1f}",
-                    f"{player['std_dev']:.1f}",
-                    f"{player['variance_score']:.1f}",
-                    f"{player['upside_score']:.1f}",
-                    f"{player['max_points']:.1f}",
-                    f"{player['boom_rate']:.1f}"
-                ))
+            if self.analysis_mode == "bestball":
+                # Load Best Ball players
+                self.current_player_pool = self.weekly_analyzer.get_top_bestball_players(
+                    stats_type=stats_type,
+                    min_games=min_games,
+                    limit=500  # Load more for filtering
+                )
 
-            self.status_var.set(f"Loaded {len(self.current_player_pool)} players")
+                # Filter by threshold
+                self.current_player_pool = [
+                    p for p in self.current_player_pool
+                    if p.get('bestball_score', 0) >= min_threshold
+                ]
+
+                # Sort
+                self.current_player_pool.sort(key=lambda x: x.get(sort_by, 0), reverse=True)
+
+                # Populate tree
+                for player in self.current_player_pool:
+                    self.player_tree.insert("", tk.END, values=(
+                        player['player_name'],
+                        f"{player['bestball_score']:.1f}",
+                        f"{player['best_week']:.1f}",
+                        f"{player['top3_weeks_avg']:.1f}",
+                        f"{player['boom_week_rate']:.1f}",
+                        f"{player['tear3_rate']:.1f}",
+                        f"{player['tear4_rate']:.1f}",
+                        f"{player['longest_tear']}"
+                    ))
+
+                self.status_var.set(f"Loaded {len(self.current_player_pool)} Best Ball players")
+
+            else:  # daily mode
+                # Load daily volatility players
+                self.current_player_pool = self.optimizer.get_player_pool(
+                    stats_type=stats_type,
+                    min_games=min_games,
+                    min_variance_score=min_threshold
+                )
+
+                # Sort
+                self.current_player_pool.sort(key=lambda x: x.get(sort_by, 0), reverse=True)
+
+                # Populate tree
+                for player in self.current_player_pool:
+                    self.player_tree.insert("", tk.END, values=(
+                        player['player_name'],
+                        player['games_played'],
+                        f"{player['mean_points']:.1f}",
+                        f"{player['std_dev']:.1f}",
+                        f"{player['variance_score']:.1f}",
+                        f"{player['upside_score']:.1f}",
+                        f"{player['max_points']:.1f}",
+                        f"{player['boom_rate']:.1f}"
+                    ))
+
+                self.status_var.set(f"Loaded {len(self.current_player_pool)} players")
 
         except Exception as e:
             messagebox.showerror("Error", f"Failed to load player pool: {e}")
             self.status_var.set("Error loading players")
             logger.error(f"Error loading player pool: {e}")
-
-    def _build_roster(self):
-        """Build optimal roster."""
-        if not self.current_player_pool:
-            messagebox.showwarning("Warning", "Please load player pool first")
-            return
-
-        self.status_var.set("Building roster...")
-        self.root.update()
-
-        try:
-            opt_metric = self.opt_metric_var.get()
-
-            self.current_roster = self.optimizer.build_max_variance_roster(
-                self.current_player_pool,
-                optimization_metric=opt_metric
-            )
-
-            self._display_roster()
-            self.status_var.set("Roster built successfully")
-
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to build roster: {e}")
-            self.status_var.set("Error building roster")
-            logger.error(f"Error building roster: {e}")
-
-    def _display_roster(self):
-        """Display current roster in text widget."""
-        if not self.current_roster:
-            return
-
-        self.roster_text.delete(1.0, tk.END)
-
-        # Header
-        self.roster_text.insert(tk.END, "=" * 60 + "\n")
-        self.roster_text.insert(tk.END, "MAX VARIANCE ROSTER\n")
-        self.roster_text.insert(tk.END, "=" * 60 + "\n\n")
-
-        # Pitchers
-        self.roster_text.insert(tk.END, "PITCHERS:\n")
-        self.roster_text.insert(tk.END, "-" * 60 + "\n")
-        for i, p in enumerate(self.current_roster.get('pitchers', []), 1):
-            self.roster_text.insert(
-                tk.END,
-                f"{i}. {p['player_name']:<30} "
-                f"Var: {p['variance_score']:.1f}  "
-                f"Mean: {p['mean_points']:.1f}\n"
-            )
-
-        self.roster_text.insert(tk.END, "\n")
-
-        # Batters
-        self.roster_text.insert(tk.END, "BATTERS:\n")
-        self.roster_text.insert(tk.END, "-" * 60 + "\n")
-        for i, p in enumerate(self.current_roster.get('batters', []), 1):
-            self.roster_text.insert(
-                tk.END,
-                f"{i}. {p['player_name']:<30} "
-                f"Var: {p['variance_score']:.1f}  "
-                f"Mean: {p['mean_points']:.1f}\n"
-            )
-
-        # Summary
-        self.roster_text.insert(tk.END, "\n" + "=" * 60 + "\n")
-        self.roster_text.insert(tk.END, "ROSTER SUMMARY:\n")
-        self.roster_text.insert(tk.END, "=" * 60 + "\n")
-        self.roster_text.insert(
-            tk.END,
-            f"Total Variance Score: {self.current_roster.get('total_variance_score', 0):.2f}\n"
-        )
-        self.roster_text.insert(
-            tk.END,
-            f"Total Upside Score: {self.current_roster.get('total_upside_score', 0):.2f}\n"
-        )
-        self.roster_text.insert(
-            tk.END,
-            f"Projected Mean Points: {self.current_roster.get('mean_projected_points', 0):.2f}\n"
-        )
-        self.roster_text.insert(
-            tk.END,
-            f"Projected Std Dev: {self.current_roster.get('std_dev', 0):.2f}\n"
-        )
-
-        # Upside evaluation
-        upside_eval = self.optimizer.evaluate_roster_upside(self.current_roster)
-        self.roster_text.insert(tk.END, "\nUPSIDE ANALYSIS:\n")
-        self.roster_text.insert(tk.END, "-" * 60 + "\n")
-        self.roster_text.insert(
-            tk.END,
-            f"Ceiling Projection (95th%): {upside_eval['ceiling_projection']:.2f}\n"
-        )
-        self.roster_text.insert(
-            tk.END,
-            f"Expected 90th Percentile: {upside_eval['expected_90th_percentile']:.2f}\n"
-        )
-        self.roster_text.insert(
-            tk.END,
-            f"Boom Probability: {upside_eval['boom_probability']:.1f}%\n"
-        )
 
     def _show_player_details(self, event):
         """Show detailed player statistics."""
@@ -433,24 +470,65 @@ class MLBVolatilityGUI:
         # Find player in pool
         player = next((p for p in self.current_player_pool if p['player_name'] == player_name), None)
 
-        if player:
-            details = f"""
-Player: {player['player_name']}
-Games Played: {player['games_played']}
+        if not player:
+            return
 
-Performance Metrics:
-  Mean Points: {player['mean_points']:.2f}
-  Std Deviation: {player['std_dev']:.2f}
-  Max Points: {player['max_points']:.2f}
-  95th Percentile: {player['percentile_95']:.2f}
+        # Clear text widget
+        self.roster_text.delete(1.0, tk.END)
 
-Volatility Scores:
-  Variance Score: {player['variance_score']:.2f}
-  Upside Score: {player['upside_score']:.2f}
-  Boom Rate: {player['boom_rate']:.1f}%
-  Top 5 Games: {player['top5_games_pct']:.1f}%
-            """
-            messagebox.showinfo(f"Player Details - {player_name}", details)
+        # Display based on mode
+        if self.analysis_mode == "bestball":
+            self.roster_text.insert(tk.END, "="*70 + "\n")
+            self.roster_text.insert(tk.END, f"BEST BALL ANALYSIS: {player_name}\n")
+            self.roster_text.insert(tk.END, "="*70 + "\n\n")
+
+            self.roster_text.insert(tk.END, "BEST BALL SCORE:\n")
+            self.roster_text.insert(tk.END, f"  Overall BB Score:      {player['bestball_score']:.1f} / 100\n\n")
+
+            self.roster_text.insert(tk.END, "WEEKLY PERFORMANCE:\n")
+            self.roster_text.insert(tk.END, f"  Best Week Ever:        {player['best_week']:.1f} pts\n")
+            self.roster_text.insert(tk.END, f"  Top 3 Weeks Avg:       {player['top3_weeks_avg']:.1f} pts\n")
+            self.roster_text.insert(tk.END, f"  Mean Weekly Points:    {player['mean_week_points']:.1f} pts\n\n")
+
+            self.roster_text.insert(tk.END, "BOOM WEEKS:\n")
+            self.roster_text.insert(tk.END, f"  Boom Week Rate:        {player['boom_week_rate']:.1f}%\n\n")
+
+            self.roster_text.insert(tk.END, "TEAR METRICS (Multi-Game Hot Streaks):\n")
+            self.roster_text.insert(tk.END, f"  TEAR3 Rate:            {player['tear3_rate']:.1f} per 100 games\n")
+            self.roster_text.insert(tk.END, f"  TEAR4 Rate:            {player['tear4_rate']:.1f} per 100 games\n")
+            self.roster_text.insert(tk.END, f"  Longest Tear:          {player['longest_tear']} consecutive hot games\n\n")
+
+            self.roster_text.insert(tk.END, "BEST BALL STRATEGY:\n")
+            if player['bestball_score'] >= 70:
+                self.roster_text.insert(tk.END, "  ★★★ ELITE - Top tier for Best Ball\n")
+            elif player['bestball_score'] >= 60:
+                self.roster_text.insert(tk.END, "  ★★ STRONG - Excellent weekly upside\n")
+            elif player['bestball_score'] >= 50:
+                self.roster_text.insert(tk.END, "  ★ SOLID - Good weekly potential\n")
+            else:
+                self.roster_text.insert(tk.END, "  SPECULATIVE - Lower weekly ceiling\n")
+
+            if player['tear3_rate'] >= 30:
+                self.roster_text.insert(tk.END, "  High TEAR ability - Goes on hot streaks!\n")
+
+        else:  # daily mode
+            self.roster_text.insert(tk.END, "="*70 + "\n")
+            self.roster_text.insert(tk.END, f"PLAYER DETAILS: {player_name}\n")
+            self.roster_text.insert(tk.END, "="*70 + "\n\n")
+
+            self.roster_text.insert(tk.END, f"Games Played: {player['games_played']}\n\n")
+
+            self.roster_text.insert(tk.END, "Performance Metrics:\n")
+            self.roster_text.insert(tk.END, f"  Mean Points:    {player['mean_points']:.2f}\n")
+            self.roster_text.insert(tk.END, f"  Std Deviation:  {player['std_dev']:.2f}\n")
+            self.roster_text.insert(tk.END, f"  Max Points:     {player['max_points']:.2f}\n")
+            self.roster_text.insert(tk.END, f"  95th %ile:      {player['percentile_95']:.2f}\n\n")
+
+            self.roster_text.insert(tk.END, "Volatility Scores:\n")
+            self.roster_text.insert(tk.END, f"  Variance Score: {player['variance_score']:.2f}\n")
+            self.roster_text.insert(tk.END, f"  Upside Score:   {player['upside_score']:.2f}\n")
+            self.roster_text.insert(tk.END, f"  Boom Rate:      {player['boom_rate']:.1f}%\n")
+            self.roster_text.insert(tk.END, f"  Top 5 Games:    {player['top5_games_pct']:.1f}%\n")
 
     def _show_db_stats(self):
         """Show database statistics."""
@@ -479,24 +557,39 @@ Performances:
         except Exception as e:
             messagebox.showerror("Error", f"Failed to get database stats: {e}")
 
-    def _export_roster(self):
-        """Export roster to file."""
-        if not self.current_roster:
-            messagebox.showwarning("Warning", "No roster to export")
+    def _export_data(self):
+        """Export current player pool to CSV."""
+        if not self.current_player_pool:
+            messagebox.showwarning("Warning", "No player pool to export")
             return
 
         filename = filedialog.asksaveasfilename(
-            defaultextension=".txt",
-            filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
         )
 
         if filename:
             try:
-                with open(filename, 'w') as f:
-                    f.write(self.roster_text.get(1.0, tk.END))
-                messagebox.showinfo("Success", f"Roster exported to {filename}")
+                import csv
+
+                with open(filename, 'w', newline='') as f:
+                    if self.analysis_mode == "bestball":
+                        fieldnames = ['player_name', 'bestball_score', 'best_week', 'top3_weeks_avg',
+                                    'boom_week_rate', 'tear3_rate', 'tear4_rate', 'longest_tear']
+                    else:
+                        fieldnames = ['player_name', 'games_played', 'mean_points', 'std_dev',
+                                    'variance_score', 'upside_score', 'max_points', 'boom_rate']
+
+                    writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    writer.writeheader()
+
+                    for player in self.current_player_pool:
+                        row = {k: player.get(k, '') for k in fieldnames}
+                        writer.writerow(row)
+
+                messagebox.showinfo("Success", f"Data exported to {filename}")
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to export roster: {e}")
+                messagebox.showerror("Error", f"Failed to export data: {e}")
 
     def run(self):
         """Run the GUI application."""
