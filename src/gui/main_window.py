@@ -6,6 +6,7 @@ from tkinter import ttk, messagebox, filedialog
 from typing import List, Dict, Optional
 import logging
 import threading
+import numpy as np
 
 try:
     import customtkinter as ctk
@@ -51,6 +52,8 @@ class MLBVolatilityGUI:
         self.current_player_pool = []
         self.current_roster = None
         self.analysis_mode = "bestball"  # "bestball" or "daily"
+        self.sort_states = {}  # Track sort state for each column: None, 'desc', 'asc'
+        self.current_sort_column = None
 
         self._create_widgets()
 
@@ -279,15 +282,23 @@ class MLBVolatilityGUI:
             "Name", "BB Score", "Best Week", "Top3 Avg", "Boom%", "TEAR3", "TEAR4", "Longest"
         ))
 
-        # Set headings
-        self.player_tree.heading("Name", text="Player Name")
-        self.player_tree.heading("BB Score", text="BB Score")
-        self.player_tree.heading("Best Week", text="Best Week")
-        self.player_tree.heading("Top3 Avg", text="Top3 Avg")
-        self.player_tree.heading("Boom%", text="Boom%")
-        self.player_tree.heading("TEAR3", text="TEAR3")
-        self.player_tree.heading("TEAR4", text="TEAR4")
-        self.player_tree.heading("Longest", text="Longest")
+        # Set headings with click-to-sort
+        self.player_tree.heading("Name", text="Player Name",
+                                command=lambda: self._sort_by_column("Name", 0, is_numeric=False))
+        self.player_tree.heading("BB Score", text="BB Score",
+                                command=lambda: self._sort_by_column("BB Score", 1))
+        self.player_tree.heading("Best Week", text="Best Week",
+                                command=lambda: self._sort_by_column("Best Week", 2))
+        self.player_tree.heading("Top3 Avg", text="Top3 Avg",
+                                command=lambda: self._sort_by_column("Top3 Avg", 3))
+        self.player_tree.heading("Boom%", text="Boom%",
+                                command=lambda: self._sort_by_column("Boom%", 4))
+        self.player_tree.heading("TEAR3", text="TEAR3",
+                                command=lambda: self._sort_by_column("TEAR3", 5))
+        self.player_tree.heading("TEAR4", text="TEAR4",
+                                command=lambda: self._sort_by_column("TEAR4", 6))
+        self.player_tree.heading("Longest", text="Longest",
+                                command=lambda: self._sort_by_column("Longest", 7))
 
         # Set column widths
         self.player_tree.column("Name", width=150)
@@ -310,15 +321,23 @@ class MLBVolatilityGUI:
             "Name", "Games", "Mean", "Std Dev", "Variance", "Upside", "Max", "Boom%"
         ))
 
-        # Set headings
-        self.player_tree.heading("Name", text="Player Name")
-        self.player_tree.heading("Games", text="Games")
-        self.player_tree.heading("Mean", text="Mean Pts")
-        self.player_tree.heading("Std Dev", text="Std Dev")
-        self.player_tree.heading("Variance", text="Var Score")
-        self.player_tree.heading("Upside", text="Upside")
-        self.player_tree.heading("Max", text="Max Pts")
-        self.player_tree.heading("Boom%", text="Boom %")
+        # Set headings with click-to-sort
+        self.player_tree.heading("Name", text="Player Name",
+                                command=lambda: self._sort_by_column("Name", 0, is_numeric=False))
+        self.player_tree.heading("Games", text="Games",
+                                command=lambda: self._sort_by_column("Games", 1))
+        self.player_tree.heading("Mean", text="Mean Pts",
+                                command=lambda: self._sort_by_column("Mean", 2))
+        self.player_tree.heading("Std Dev", text="Std Dev",
+                                command=lambda: self._sort_by_column("Std Dev", 3))
+        self.player_tree.heading("Variance", text="Var Score",
+                                command=lambda: self._sort_by_column("Variance", 4))
+        self.player_tree.heading("Upside", text="Upside",
+                                command=lambda: self._sort_by_column("Upside", 5))
+        self.player_tree.heading("Max", text="Max Pts",
+                                command=lambda: self._sort_by_column("Max", 6))
+        self.player_tree.heading("Boom%", text="Boom %",
+                                command=lambda: self._sort_by_column("Boom%", 7))
 
         # Set column widths
         self.player_tree.column("Name", width=150)
@@ -340,6 +359,9 @@ class MLBVolatilityGUI:
         # Create treeview (will be configured based on mode)
         self.player_tree = ttk.Treeview(player_frame, show="headings", height=15)
 
+        # Configure color tags for percentile-based coloring
+        self._configure_color_tags()
+
         # Initial setup for Best Ball mode
         self._update_tree_columns_bestball()
 
@@ -352,6 +374,186 @@ class MLBVolatilityGUI:
 
         # Double-click to view details
         self.player_tree.bind("<Double-1>", self._show_player_details)
+
+    def _configure_color_tags(self):
+        """Configure color tags for percentile-based visualization."""
+        # Percentile color scheme (higher is better = greener)
+        self.player_tree.tag_configure('percentile_90_100', background='#2d5016')  # Dark green
+        self.player_tree.tag_configure('percentile_75_90', background='#5a8c3a')   # Medium green
+        self.player_tree.tag_configure('percentile_60_75', background='#8fbc5a')   # Light green
+        self.player_tree.tag_configure('percentile_40_60', background='#d9e3c8')   # Very light green
+        self.player_tree.tag_configure('percentile_25_40', background='#f5deb3')   # Light tan
+        self.player_tree.tag_configure('percentile_0_25', background='#f5b7a8')    # Light red
+
+    def _calculate_percentiles(self, column_index: int) -> Dict:
+        """
+        Calculate percentiles for a specific column.
+
+        Args:
+            column_index: Index of the column to calculate percentiles for
+
+        Returns:
+            Dictionary mapping item IDs to percentile values
+        """
+        values = []
+        item_values = {}
+
+        for item in self.player_tree.get_children():
+            try:
+                val_str = self.player_tree.item(item)['values'][column_index]
+                # Convert to float, removing any non-numeric characters
+                val = float(str(val_str).replace('%', '').replace(',', ''))
+                values.append(val)
+                item_values[item] = val
+            except (ValueError, IndexError):
+                continue
+
+        if not values:
+            return {}
+
+        # Calculate percentile for each item
+        values_array = np.array(values)
+        percentiles = {}
+
+        for item, val in item_values.items():
+            # Calculate percentile (0-100)
+            percentile = (np.sum(values_array <= val) / len(values_array)) * 100
+            percentiles[item] = percentile
+
+        return percentiles
+
+    def _get_percentile_tag(self, percentile: float) -> str:
+        """Get the appropriate color tag for a percentile value."""
+        if percentile >= 90:
+            return 'percentile_90_100'
+        elif percentile >= 75:
+            return 'percentile_75_90'
+        elif percentile >= 60:
+            return 'percentile_60_75'
+        elif percentile >= 40:
+            return 'percentile_40_60'
+        elif percentile >= 25:
+            return 'percentile_25_40'
+        else:
+            return 'percentile_0_25'
+
+    def _apply_percentile_colors(self, numeric_columns: List[int]):
+        """
+        Apply percentile-based colors to all numeric columns.
+
+        Args:
+            numeric_columns: List of column indices that contain numeric data
+        """
+        if not numeric_columns:
+            return
+
+        # For simplicity, use the first numeric column for overall coloring
+        # (typically the most important metric like BB Score or Variance Score)
+        main_column = numeric_columns[0]
+        percentiles = self._calculate_percentiles(main_column)
+
+        for item, percentile in percentiles.items():
+            tag = self._get_percentile_tag(percentile)
+            self.player_tree.item(item, tags=(tag,))
+
+    def _sort_by_column(self, column: str, column_index: int, is_numeric: bool = True):
+        """
+        Sort tree by column with toggle through: unsorted -> desc -> asc -> unsorted.
+
+        Args:
+            column: Column name
+            column_index: Column index in values tuple
+            is_numeric: Whether the column contains numeric data
+        """
+        # Determine next sort state
+        current_state = self.sort_states.get(column)
+
+        if current_state is None:
+            new_state = 'desc'
+        elif current_state == 'desc':
+            new_state = 'asc'
+        else:  # was 'asc'
+            new_state = None
+
+        # Reset all column headers
+        for col in self.player_tree['columns']:
+            heading_text = col
+            if heading_text != "Name":  # Keep original name for Name column
+                # Remove any existing sort indicators
+                heading_text = col.replace(' ▼', '').replace(' ▲', '')
+            self.player_tree.heading(col, text=heading_text)
+
+        # Reset sort states for other columns
+        if new_state is None:
+            # Unsorted - restore original order
+            self.sort_states = {}
+            self.current_sort_column = None
+            self._refresh_tree_display()
+        else:
+            # Apply new sort
+            self.sort_states = {column: new_state}
+            self.current_sort_column = column
+
+            # Update header with indicator
+            indicator = ' ▼' if new_state == 'desc' else ' ▲'
+            self.player_tree.heading(column, text=column + indicator)
+
+            # Sort the data
+            items = []
+            for item in self.player_tree.get_children():
+                values = self.player_tree.item(item)['values']
+                try:
+                    if is_numeric:
+                        sort_val = float(str(values[column_index]).replace('%', '').replace(',', ''))
+                    else:
+                        sort_val = str(values[column_index])
+                except (ValueError, IndexError):
+                    sort_val = 0 if is_numeric else ""
+                items.append((sort_val, item, values))
+
+            # Sort
+            reverse = (new_state == 'desc')
+            items.sort(key=lambda x: x[0], reverse=reverse)
+
+            # Reorder tree
+            for index, (_, item, _) in enumerate(items):
+                self.player_tree.move(item, '', index)
+
+    def _refresh_tree_display(self):
+        """Refresh tree display with current data and apply colors."""
+        # Clear tree
+        for item in self.player_tree.get_children():
+            self.player_tree.delete(item)
+
+        # Re-populate based on mode
+        if self.analysis_mode == "bestball":
+            for player in self.current_player_pool:
+                self.player_tree.insert("", tk.END, values=(
+                    player['player_name'],
+                    f"{player['bestball_score']:.1f}",
+                    f"{player['best_week']:.1f}",
+                    f"{player['top3_weeks_avg']:.1f}",
+                    f"{player['boom_week_rate']:.1f}",
+                    f"{player['tear3_rate']:.1f}",
+                    f"{player['tear4_rate']:.1f}",
+                    f"{player['longest_tear']}"
+                ))
+            # Apply colors (columns 1-7 are numeric, column 0 is name)
+            self._apply_percentile_colors([1])  # Use BB Score for coloring
+        else:
+            for player in self.current_player_pool:
+                self.player_tree.insert("", tk.END, values=(
+                    player['player_name'],
+                    player['games_played'],
+                    f"{player['mean_points']:.1f}",
+                    f"{player['std_dev']:.1f}",
+                    f"{player['variance_score']:.1f}",
+                    f"{player['upside_score']:.1f}",
+                    f"{player['max_points']:.1f}",
+                    f"{player['boom_rate']:.1f}"
+                ))
+            # Apply colors (columns 1-7 are numeric, column 0 is name)
+            self._apply_percentile_colors([4])  # Use Variance Score for coloring
 
     def _create_roster_panel(self, parent):
         """Create roster display panel."""
@@ -426,6 +628,9 @@ class MLBVolatilityGUI:
                     f"{player['max_points']:.1f}",
                     f"{player['boom_rate']:.1f}"
                 ))
+
+            # Apply percentile-based colors (Variance Score is column 4)
+            self._apply_percentile_colors([4])
 
             self.status_var.set(f"Loaded {len(self.current_player_pool)} players")
 
@@ -511,6 +716,9 @@ class MLBVolatilityGUI:
                                 f"{player['tear4_rate']:.1f}",
                                 f"{player['longest_tear']}"
                             ))
+
+                        # Apply percentile-based colors (BB Score is column 1)
+                        self._apply_percentile_colors([1])
 
                         self.status_var.set(f"Loaded {len(self.current_player_pool)} Best Ball players")
                         progress_win.destroy()
