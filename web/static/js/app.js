@@ -104,12 +104,12 @@ function renderTable() {
         // Stats with percentile bars
         const stats = [
             { key: 'bestball_score', decimals: 1 },
+            { key: 'useful_points_total', decimals: 1 },
+            { key: 'useful_weeks_pct', decimals: 1 },
             { key: 'best_week', decimals: 1 },
-            { key: 'top3_weeks_avg', decimals: 1 },
             { key: 'boom_week_rate', decimals: 1 },
             { key: 'tear3_rate', decimals: 1 },
-            { key: 'tear4_rate', decimals: 1 },
-            { key: 'longest_tear', decimals: 0 }
+            { key: 'tear4_rate', decimals: 1 }
         ];
 
         stats.forEach(stat => {

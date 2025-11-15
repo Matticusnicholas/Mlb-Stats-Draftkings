@@ -130,8 +130,9 @@ def calculate_percentiles(players):
         return []
 
     # Stats to calculate percentiles for
-    stats = ['bestball_score', 'best_week', 'top3_weeks_avg', 'boom_week_rate',
-             'tear3_rate', 'tear4_rate', 'longest_tear', 'mean_week_points']
+    stats = ['bestball_score', 'useful_points_total', 'useful_weeks_pct', 'best_week',
+             'top3_weeks_avg', 'boom_week_rate', 'tear3_rate', 'tear4_rate',
+             'longest_tear', 'mean_week_points']
 
     # Calculate percentiles for each stat
     for stat in stats:

@@ -239,12 +239,12 @@ class MLBVolatilityGUI:
         if self.analysis_mode == "bestball":
             self.threshold_label.config(text="Min BB Score:")
             self.sort_combo.configure(values=[
-                "bestball_score", "best_week", "tear3_rate", "tear4_rate", "boom_week_rate", "top3_weeks_avg"
+                "bestball_score", "useful_points_total", "useful_weeks_pct", "best_week", "tear3_rate", "tear4_rate", "boom_week_rate"
             ])
             self.sort_by_var.set("bestball_score")
             self.load_btn.config(text="Load Best Ball Players")
             self.info_label.config(
-                text="Best Ball Mode:\n• Rolling 7-day windows\n• TEAR metrics\n• Weekly ceilings"
+                text="Best Ball Mode:\n• Rolling 7-day windows\n• USEFUL points (starting-worthy weeks)\n• TEAR metrics"
             )
             self.status_var.set("Best Ball Mode (Rolling 7-Day Windows)")
 
@@ -279,7 +279,7 @@ class MLBVolatilityGUI:
 
         # Reconfigure columns
         self.player_tree.configure(columns=(
-            "Name", "BB Score", "Best Week", "Top3 Avg", "Boom%", "TEAR3", "TEAR4", "Longest"
+            "Name", "BB Score", "Useful Pts", "Useful%", "Best Week", "Top3 Avg", "Boom%", "TEAR3", "TEAR4"
         ))
 
         # Set headings with click-to-sort
@@ -287,28 +287,31 @@ class MLBVolatilityGUI:
                                 command=lambda: self._sort_by_column("Name", 0, is_numeric=False))
         self.player_tree.heading("BB Score", text="BB Score",
                                 command=lambda: self._sort_by_column("BB Score", 1))
+        self.player_tree.heading("Useful Pts", text="Useful Pts",
+                                command=lambda: self._sort_by_column("Useful Pts", 2))
+        self.player_tree.heading("Useful%", text="Useful%",
+                                command=lambda: self._sort_by_column("Useful%", 3))
         self.player_tree.heading("Best Week", text="Best Week",
-                                command=lambda: self._sort_by_column("Best Week", 2))
+                                command=lambda: self._sort_by_column("Best Week", 4))
         self.player_tree.heading("Top3 Avg", text="Top3 Avg",
-                                command=lambda: self._sort_by_column("Top3 Avg", 3))
+                                command=lambda: self._sort_by_column("Top3 Avg", 5))
         self.player_tree.heading("Boom%", text="Boom%",
-                                command=lambda: self._sort_by_column("Boom%", 4))
+                                command=lambda: self._sort_by_column("Boom%", 6))
         self.player_tree.heading("TEAR3", text="TEAR3",
-                                command=lambda: self._sort_by_column("TEAR3", 5))
+                                command=lambda: self._sort_by_column("TEAR3", 7))
         self.player_tree.heading("TEAR4", text="TEAR4",
-                                command=lambda: self._sort_by_column("TEAR4", 6))
-        self.player_tree.heading("Longest", text="Longest",
-                                command=lambda: self._sort_by_column("Longest", 7))
+                                command=lambda: self._sort_by_column("TEAR4", 8))
 
         # Set column widths (wider to accommodate percentile bars)
         self.player_tree.column("Name", width=150)
         self.player_tree.column("BB Score", width=120)
+        self.player_tree.column("Useful Pts", width=110)
+        self.player_tree.column("Useful%", width=100)
         self.player_tree.column("Best Week", width=120)
         self.player_tree.column("Top3 Avg", width=120)
         self.player_tree.column("Boom%", width=110)
         self.player_tree.column("TEAR3", width=110)
         self.player_tree.column("TEAR4", width=110)
-        self.player_tree.column("Longest", width=100)
 
     def _update_tree_columns_daily(self):
         """Update tree columns for Daily mode."""
@@ -658,9 +661,9 @@ class MLBVolatilityGUI:
 
         # Re-populate based on mode with percentile bars
         if self.analysis_mode == "bestball":
-            value_keys = ['player_name', 'bestball_score', 'best_week', 'top3_weeks_avg',
-                         'boom_week_rate', 'tear3_rate', 'tear4_rate', 'longest_tear']
-            numeric_cols = {1, 2, 3, 4, 5, 6, 7}  # All columns except name
+            value_keys = ['player_name', 'bestball_score', 'useful_points_total', 'useful_weeks_pct',
+                         'best_week', 'top3_weeks_avg', 'boom_week_rate', 'tear3_rate', 'tear4_rate']
+            numeric_cols = {1, 2, 3, 4, 5, 6, 7, 8}  # All columns except name
 
             display_rows = self._apply_percentile_bars_to_data(
                 self.current_player_pool, numeric_cols, value_keys
@@ -828,9 +831,9 @@ class MLBVolatilityGUI:
                         self.current_player_pool = player_pool
 
                         # Prepare data with percentile bars
-                        value_keys = ['player_name', 'bestball_score', 'best_week', 'top3_weeks_avg',
-                                     'boom_week_rate', 'tear3_rate', 'tear4_rate', 'longest_tear']
-                        numeric_cols = {1, 2, 3, 4, 5, 6, 7}  # All columns except name
+                        value_keys = ['player_name', 'bestball_score', 'useful_points_total', 'useful_weeks_pct',
+                                     'best_week', 'top3_weeks_avg', 'boom_week_rate', 'tear3_rate', 'tear4_rate']
+                        numeric_cols = {1, 2, 3, 4, 5, 6, 7, 8}  # All columns except name
 
                         display_rows = self._apply_percentile_bars_to_data(
                             self.current_player_pool, numeric_cols, value_keys
@@ -892,6 +895,12 @@ class MLBVolatilityGUI:
             self.roster_text.insert(tk.END, f"  Best Week Ever:        {player['best_week']:.1f} pts\n")
             self.roster_text.insert(tk.END, f"  Top 3 Weeks Avg:       {player['top3_weeks_avg']:.1f} pts\n")
             self.roster_text.insert(tk.END, f"  Mean Weekly Points:    {player['mean_week_points']:.1f} pts\n\n")
+
+            self.roster_text.insert(tk.END, "USEFUL POINTS (Starting-Worthy Weeks):\n")
+            self.roster_text.insert(tk.END, f"  Total Useful Points:   {player.get('useful_points_total', 0):.1f} pts\n")
+            self.roster_text.insert(tk.END, f"  Useful Weeks:          {player.get('useful_weeks_pct', 0):.1f}% of all weeks\n")
+            self.roster_text.insert(tk.END, f"  Efficiency:            {player.get('useful_efficiency', 0):.1f}% of points from useful weeks\n")
+            self.roster_text.insert(tk.END, f"  Useful Threshold:      {player.get('useful_threshold', 0):.1f} pts (70th %ile league-wide)\n\n")
 
             self.roster_text.insert(tk.END, "BOOM WEEKS:\n")
             self.roster_text.insert(tk.END, f"  Boom Week Rate:        {player['boom_week_rate']:.1f}%\n\n")

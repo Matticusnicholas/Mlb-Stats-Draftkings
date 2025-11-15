@@ -260,6 +260,26 @@ class WeeklyAnalyzer:
         total_sum = float(np.sum(window_points))
         metrics['top5_weeks_pct'] = (top5_sum / total_sum * 100) if total_sum > 0 else 0
 
+        # USEFUL points metric - only count weeks worthy of starting lineup
+        # Threshold based on top 100-150 players' weekly scores (70th percentile)
+        # This represents "starting worthy" performance in a competitive league
+        useful_threshold = self._get_useful_threshold(stats_type)
+        useful_weeks_mask = window_points >= useful_threshold
+        useful_weeks = window_points[useful_weeks_mask]
+
+        metrics['useful_threshold'] = float(useful_threshold)
+        metrics['useful_points_total'] = float(np.sum(useful_weeks)) if len(useful_weeks) > 0 else 0
+        metrics['useful_weeks_count'] = int(np.sum(useful_weeks_mask))
+        metrics['useful_weeks_pct'] = float(np.sum(useful_weeks_mask) / len(window_points) * 100) if len(window_points) > 0 else 0
+
+        # Wasted points (points from non-starting-worthy weeks)
+        wasted_weeks = window_points[~useful_weeks_mask]
+        metrics['wasted_points'] = float(np.sum(wasted_weeks)) if len(wasted_weeks) > 0 else 0
+        metrics['wasted_weeks_count'] = int(len(wasted_weeks))
+
+        # Efficiency: what % of total points came from starting-worthy weeks
+        metrics['useful_efficiency'] = float((metrics['useful_points_total'] / total_sum * 100)) if total_sum > 0 else 0
+
         # TEAR metrics
         tear_metrics = self.calculate_tear_metrics(player_id, stats_type)
         metrics.update(tear_metrics)
@@ -272,6 +292,74 @@ class WeeklyAnalyzer:
         metrics['bestball_score'] = self._calculate_bestball_score(metrics)
 
         return metrics
+
+    def _get_useful_threshold(self, stats_type: str = "batting") -> float:
+        """
+        Calculate league-wide "starting worthy" threshold.
+
+        Gets top 100-150 players' weekly scores and uses 70th percentile
+        as the threshold for a "useful" (starting-worthy) week.
+
+        Args:
+            stats_type: 'batting' or 'pitching'
+
+        Returns:
+            Weekly point threshold for starting-worthy performance
+        """
+        # Cache threshold to avoid recalculating for every player
+        cache_key = f'_useful_threshold_{stats_type}'
+        if hasattr(self, cache_key):
+            return getattr(self, cache_key)
+
+        # Get top players by game count
+        session = self.db.get_session()
+        try:
+            from sqlalchemy import func
+            from ..database.models import PlayerGame
+
+            # Get players with most games (top ~150)
+            top_players = session.query(
+                PlayerGame.player_id,
+                func.count(PlayerGame.game_pk).label('game_count')
+            ).filter(
+                PlayerGame.stats_type == stats_type
+            ).group_by(
+                PlayerGame.player_id
+            ).having(
+                func.count(PlayerGame.game_pk) >= 20
+            ).order_by(
+                func.count(PlayerGame.game_pk).desc()
+            ).limit(150).all()
+
+            if not top_players:
+                # Fallback if no data
+                return 25.0 if stats_type == "batting" else 30.0
+
+            # Collect all weekly scores from these top players
+            all_weekly_scores = []
+
+            for player_id, _ in top_players:
+                rolling_df = self.get_player_rolling_windows(player_id, stats_type, window_days=7)
+                if not rolling_df.empty:
+                    all_weekly_scores.extend(rolling_df['window_points'].values)
+
+            if not all_weekly_scores:
+                # Fallback
+                return 25.0 if stats_type == "batting" else 30.0
+
+            # Use 70th percentile as "starting worthy" threshold
+            # This means if your week is in top 30% of all weeks, it's useful
+            threshold = float(np.percentile(all_weekly_scores, 70))
+
+            # Cache for this instance
+            setattr(self, cache_key, threshold)
+
+            logger.info(f"Calculated USEFUL threshold for {stats_type}: {threshold:.2f} pts (70th percentile)")
+
+            return threshold
+
+        finally:
+            session.close()
 
     def _calculate_bestball_score(self, metrics: Dict) -> float:
         """
