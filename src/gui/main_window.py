@@ -47,7 +47,7 @@ class MLBVolatilityGUI:
             self.root = tk.Tk()
 
         self.root.title("MLB DraftKings Best Ball Analyzer")
-        self.root.geometry("1400x850")
+        self.root.geometry("1600x850")
 
         self.current_player_pool = []
         self.current_roster = None
@@ -300,15 +300,15 @@ class MLBVolatilityGUI:
         self.player_tree.heading("Longest", text="Longest",
                                 command=lambda: self._sort_by_column("Longest", 7))
 
-        # Set column widths
+        # Set column widths (wider to accommodate percentile bars)
         self.player_tree.column("Name", width=150)
-        self.player_tree.column("BB Score", width=80)
-        self.player_tree.column("Best Week", width=90)
-        self.player_tree.column("Top3 Avg", width=90)
-        self.player_tree.column("Boom%", width=70)
-        self.player_tree.column("TEAR3", width=70)
-        self.player_tree.column("TEAR4", width=70)
-        self.player_tree.column("Longest", width=70)
+        self.player_tree.column("BB Score", width=120)
+        self.player_tree.column("Best Week", width=120)
+        self.player_tree.column("Top3 Avg", width=120)
+        self.player_tree.column("Boom%", width=110)
+        self.player_tree.column("TEAR3", width=110)
+        self.player_tree.column("TEAR4", width=110)
+        self.player_tree.column("Longest", width=100)
 
     def _update_tree_columns_daily(self):
         """Update tree columns for Daily mode."""
@@ -339,15 +339,15 @@ class MLBVolatilityGUI:
         self.player_tree.heading("Boom%", text="Boom %",
                                 command=lambda: self._sort_by_column("Boom%", 7))
 
-        # Set column widths
+        # Set column widths (wider to accommodate percentile bars)
         self.player_tree.column("Name", width=150)
-        self.player_tree.column("Games", width=60)
-        self.player_tree.column("Mean", width=70)
-        self.player_tree.column("Std Dev", width=70)
-        self.player_tree.column("Variance", width=80)
-        self.player_tree.column("Upside", width=70)
-        self.player_tree.column("Max", width=70)
-        self.player_tree.column("Boom%", width=70)
+        self.player_tree.column("Games", width=90)
+        self.player_tree.column("Mean", width=110)
+        self.player_tree.column("Std Dev", width=110)
+        self.player_tree.column("Variance", width=120)
+        self.player_tree.column("Upside", width=110)
+        self.player_tree.column("Max", width=110)
+        self.player_tree.column("Boom%", width=110)
 
     def _create_player_list(self, parent):
         """Create player list view."""
@@ -377,13 +377,14 @@ class MLBVolatilityGUI:
 
     def _configure_color_tags(self):
         """Configure color tags for percentile-based visualization."""
-        # Percentile color scheme (higher is better = greener)
-        self.player_tree.tag_configure('percentile_90_100', background='#2d5016')  # Dark green
-        self.player_tree.tag_configure('percentile_75_90', background='#5a8c3a')   # Medium green
-        self.player_tree.tag_configure('percentile_60_75', background='#8fbc5a')   # Light green
-        self.player_tree.tag_configure('percentile_40_60', background='#d9e3c8')   # Very light green
-        self.player_tree.tag_configure('percentile_25_40', background='#f5deb3')   # Light tan
-        self.player_tree.tag_configure('percentile_0_25', background='#f5b7a8')    # Light red
+        # Gradient from blue (low) to white (mid) to red (high) like Baseball Savant
+        # We'll use row-level background as a subtle base, but main visualization is in the bars
+        self.player_tree.tag_configure('percentile_90_100', background='#ffe6e6')  # Very light red
+        self.player_tree.tag_configure('percentile_80_90', background='#fff2f2')   # Lighter red
+        self.player_tree.tag_configure('percentile_60_80', background='#fffafa')   # Very light
+        self.player_tree.tag_configure('percentile_40_60', background='#ffffff')   # White
+        self.player_tree.tag_configure('percentile_20_40', background='#f0f8ff')   # Very light blue
+        self.player_tree.tag_configure('percentile_0_20', background='#e6f2ff')    # Light blue
 
     def _calculate_percentiles(self, column_index: int) -> Dict:
         """
@@ -426,20 +427,147 @@ class MLBVolatilityGUI:
         """Get the appropriate color tag for a percentile value."""
         if percentile >= 90:
             return 'percentile_90_100'
-        elif percentile >= 75:
-            return 'percentile_75_90'
+        elif percentile >= 80:
+            return 'percentile_80_90'
         elif percentile >= 60:
-            return 'percentile_60_75'
+            return 'percentile_60_80'
         elif percentile >= 40:
             return 'percentile_40_60'
-        elif percentile >= 25:
-            return 'percentile_25_40'
+        elif percentile >= 20:
+            return 'percentile_20_40'
         else:
-            return 'percentile_0_25'
+            return 'percentile_0_20'
+
+    def _create_percentile_bar(self, percentile: float) -> str:
+        """
+        Create a visual percentile bar using Unicode block characters.
+
+        Args:
+            percentile: Percentile value (0-100)
+
+        Returns:
+            String representation of the percentile bar
+        """
+        # Use block characters to create a 10-character bar
+        # Full block: █, Light shade: ░
+        bar_length = 10
+        filled = int((percentile / 100) * bar_length)
+
+        # Create color-coded bar using different characters
+        # Higher percentile (red/hot) uses █, lower (blue/cold) uses different shades
+        if percentile >= 80:
+            # Hot/Red zone - solid blocks
+            bar = '█' * filled + '░' * (bar_length - filled)
+        elif percentile >= 60:
+            # Warm zone - solid blocks
+            bar = '▓' * filled + '░' * (bar_length - filled)
+        elif percentile >= 40:
+            # Middle zone - medium blocks
+            bar = '▒' * filled + '░' * (bar_length - filled)
+        else:
+            # Cool/Blue zone - lighter blocks
+            bar = '░' * filled + '·' * (bar_length - filled)
+
+        return bar
+
+    def _calculate_all_column_percentiles(self, numeric_column_indices: List[int]) -> Dict[int, Dict]:
+        """
+        Calculate percentiles for all numeric columns.
+
+        Args:
+            numeric_column_indices: List of column indices to calculate percentiles for
+
+        Returns:
+            Dictionary mapping column index to {item_id: percentile} dict
+        """
+        all_percentiles = {}
+
+        for col_idx in numeric_column_indices:
+            all_percentiles[col_idx] = self._calculate_percentiles(col_idx)
+
+        return all_percentiles
+
+    def _apply_percentile_bars_to_data(self, data: List[Dict], numeric_columns: Dict[str, int], value_keys: List[str]) -> List[tuple]:
+        """
+        Add percentile bars to player data for display.
+
+        Args:
+            data: List of player dictionaries
+            numeric_columns: Dict mapping column index to whether it should have a bar
+            value_keys: List of keys to extract from player dicts in order
+
+        Returns:
+            List of tuples ready for tree insertion with percentile bars
+        """
+        # First, collect all values for each numeric column to calculate percentiles
+        column_values = {}
+        for col_idx in numeric_columns:
+            column_values[col_idx] = []
+
+        # Extract values from data
+        for player in data:
+            for col_idx, key in enumerate(value_keys):
+                if col_idx in numeric_columns:
+                    try:
+                        if key in player:
+                            val = float(player[key])
+                            column_values[col_idx].append(val)
+                        else:
+                            column_values[col_idx].append(0.0)
+                    except (ValueError, TypeError):
+                        column_values[col_idx].append(0.0)
+
+        # Calculate percentiles for each column
+        column_percentiles = {}
+        for col_idx, values in column_values.items():
+            if not values:
+                continue
+            values_array = np.array(values)
+            column_percentiles[col_idx] = []
+
+            for val in values:
+                if len(values) > 1:
+                    percentile = (np.sum(values_array <= val) / len(values_array)) * 100
+                else:
+                    percentile = 50
+                column_percentiles[col_idx].append(percentile)
+
+        # Build display rows with percentile bars
+        display_rows = []
+        for player_idx, player in enumerate(data):
+            row_values = []
+            for col_idx, key in enumerate(value_keys):
+                if col_idx in numeric_columns:
+                    # Add value with percentile bar
+                    if key in player:
+                        val = player[key]
+                        percentile = column_percentiles[col_idx][player_idx] if col_idx in column_percentiles else 50
+                        bar = self._create_percentile_bar(percentile)
+
+                        # Format number based on type
+                        if isinstance(val, (int, float)):
+                            if key == 'games_played' or key == 'longest_tear':
+                                formatted = f"{int(val)}"
+                            else:
+                                formatted = f"{val:.1f}"
+                        else:
+                            formatted = str(val)
+
+                        cell_text = f"{formatted} {bar}"
+                        row_values.append(cell_text)
+                    else:
+                        row_values.append("N/A")
+                else:
+                    # Non-numeric column (like name)
+                    row_values.append(player.get(key, ""))
+
+            display_rows.append(tuple(row_values))
+
+        return display_rows
 
     def _apply_percentile_colors(self, numeric_columns: List[int]):
         """
-        Apply percentile-based colors to all numeric columns.
+        Apply percentile-based row colors.
 
         Args:
             numeric_columns: List of column indices that contain numeric data
@@ -447,8 +575,7 @@ class MLBVolatilityGUI:
         if not numeric_columns:
             return
 
-        # For simplicity, use the first numeric column for overall coloring
-        # (typically the most important metric like BB Score or Variance Score)
+        # Use the first numeric column for overall row coloring
         main_column = numeric_columns[0]
         percentiles = self._calculate_percentiles(main_column)
 
@@ -504,7 +631,11 @@ class MLBVolatilityGUI:
                 values = self.player_tree.item(item)['values']
                 try:
                     if is_numeric:
-                        sort_val = float(str(values[column_index]).replace('%', '').replace(',', ''))
+                        # Extract numeric value from string that may contain percentile bar
+                        val_str = str(values[column_index])
+                        # Split by space and take first part (the number)
+                        numeric_part = val_str.split()[0] if ' ' in val_str else val_str
+                        sort_val = float(numeric_part.replace('%', '').replace(',', ''))
                     else:
                         sort_val = str(values[column_index])
                 except (ValueError, IndexError):
@@ -525,35 +656,30 @@ class MLBVolatilityGUI:
         for item in self.player_tree.get_children():
             self.player_tree.delete(item)
 
-        # Re-populate based on mode
+        # Re-populate based on mode with percentile bars
         if self.analysis_mode == "bestball":
-            for player in self.current_player_pool:
-                self.player_tree.insert("", tk.END, values=(
-                    player['player_name'],
-                    f"{player['bestball_score']:.1f}",
-                    f"{player['best_week']:.1f}",
-                    f"{player['top3_weeks_avg']:.1f}",
-                    f"{player['boom_week_rate']:.1f}",
-                    f"{player['tear3_rate']:.1f}",
-                    f"{player['tear4_rate']:.1f}",
-                    f"{player['longest_tear']}"
-                ))
-            # Apply colors (columns 1-7 are numeric, column 0 is name)
-            self._apply_percentile_colors([1])  # Use BB Score for coloring
+            value_keys = ['player_name', 'bestball_score', 'best_week', 'top3_weeks_avg',
+                         'boom_week_rate', 'tear3_rate', 'tear4_rate', 'longest_tear']
+            numeric_cols = {1, 2, 3, 4, 5, 6, 7}  # All columns except name
+
+            display_rows = self._apply_percentile_bars_to_data(
+                self.current_player_pool, numeric_cols, value_keys
+            )
+
+            for row in display_rows:
+                self.player_tree.insert("", tk.END, values=row)
+
         else:
-            for player in self.current_player_pool:
-                self.player_tree.insert("", tk.END, values=(
-                    player['player_name'],
-                    player['games_played'],
-                    f"{player['mean_points']:.1f}",
-                    f"{player['std_dev']:.1f}",
-                    f"{player['variance_score']:.1f}",
-                    f"{player['upside_score']:.1f}",
-                    f"{player['max_points']:.1f}",
-                    f"{player['boom_rate']:.1f}"
-                ))
-            # Apply colors (columns 1-7 are numeric, column 0 is name)
-            self._apply_percentile_colors([4])  # Use Variance Score for coloring
+            value_keys = ['player_name', 'games_played', 'mean_points', 'std_dev',
+                         'variance_score', 'upside_score', 'max_points', 'boom_rate']
+            numeric_cols = {1, 2, 3, 4, 5, 6, 7}  # All columns except name
+
+            display_rows = self._apply_percentile_bars_to_data(
+                self.current_player_pool, numeric_cols, value_keys
+            )
+
+            for row in display_rows:
+                self.player_tree.insert("", tk.END, values=row)
 
     def _create_roster_panel(self, parent):
         """Create roster display panel."""
@@ -616,21 +742,18 @@ class MLBVolatilityGUI:
             # Sort
             self.current_player_pool.sort(key=lambda x: x.get(sort_by, 0), reverse=True)
 
-            # Populate tree
-            for player in self.current_player_pool:
-                self.player_tree.insert("", tk.END, values=(
-                    player['player_name'],
-                    player['games_played'],
-                    f"{player['mean_points']:.1f}",
-                    f"{player['std_dev']:.1f}",
-                    f"{player['variance_score']:.1f}",
-                    f"{player['upside_score']:.1f}",
-                    f"{player['max_points']:.1f}",
-                    f"{player['boom_rate']:.1f}"
-                ))
+            # Prepare data with percentile bars
+            value_keys = ['player_name', 'games_played', 'mean_points', 'std_dev',
+                         'variance_score', 'upside_score', 'max_points', 'boom_rate']
+            numeric_cols = {1, 2, 3, 4, 5, 6, 7}  # All columns except name
 
-            # Apply percentile-based colors (Variance Score is column 4)
-            self._apply_percentile_colors([4])
+            display_rows = self._apply_percentile_bars_to_data(
+                self.current_player_pool, numeric_cols, value_keys
+            )
+
+            # Populate tree with percentile bars
+            for row in display_rows:
+                self.player_tree.insert("", tk.END, values=row)
 
             self.status_var.set(f"Loaded {len(self.current_player_pool)} players")
 
@@ -704,21 +827,18 @@ class MLBVolatilityGUI:
                     try:
                         self.current_player_pool = player_pool
 
-                        # Populate tree
-                        for player in self.current_player_pool:
-                            self.player_tree.insert("", tk.END, values=(
-                                player['player_name'],
-                                f"{player['bestball_score']:.1f}",
-                                f"{player['best_week']:.1f}",
-                                f"{player['top3_weeks_avg']:.1f}",
-                                f"{player['boom_week_rate']:.1f}",
-                                f"{player['tear3_rate']:.1f}",
-                                f"{player['tear4_rate']:.1f}",
-                                f"{player['longest_tear']}"
-                            ))
+                        # Prepare data with percentile bars
+                        value_keys = ['player_name', 'bestball_score', 'best_week', 'top3_weeks_avg',
+                                     'boom_week_rate', 'tear3_rate', 'tear4_rate', 'longest_tear']
+                        numeric_cols = {1, 2, 3, 4, 5, 6, 7}  # All columns except name
 
-                        # Apply percentile-based colors (BB Score is column 1)
-                        self._apply_percentile_colors([1])
+                        display_rows = self._apply_percentile_bars_to_data(
+                            self.current_player_pool, numeric_cols, value_keys
+                        )
+
+                        # Populate tree with percentile bars
+                        for row in display_rows:
+                            self.player_tree.insert("", tk.END, values=row)
 
                         self.status_var.set(f"Loaded {len(self.current_player_pool)} Best Ball players")
                         progress_win.destroy()
