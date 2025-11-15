@@ -280,6 +280,9 @@ class WeeklyAnalyzer:
         # Efficiency: what % of total points came from starting-worthy weeks
         metrics['useful_efficiency'] = float((metrics['useful_points_total'] / total_sum * 100)) if total_sum > 0 else 0
 
+        # Concentration: average points per useful week (spike-iness of useful production)
+        metrics['useful_points_per_week'] = float(metrics['useful_points_total'] / metrics['useful_weeks_count']) if metrics['useful_weeks_count'] > 0 else 0
+
         # TEAR metrics
         tear_metrics = self.calculate_tear_metrics(player_id, stats_type)
         metrics.update(tear_metrics)

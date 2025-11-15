@@ -55,7 +55,8 @@
             <ul>
                 <li><strong>BB Score:</strong> Composite 0-100 metric combining best week, consistency, and TEAR ability</li>
                 <li><strong>Useful Pts:</strong> Total points from starting-worthy weeks (70th %ile threshold)</li>
-                <li><strong>Useful%:</strong> Percentage of weeks that scored above starting threshold</li>
+                <li><strong>Useful Wks:</strong> Count of weeks above starting threshold</li>
+                <li><strong>Pts/Wk:</strong> Average points per useful week (concentration metric - higher = more explosive)</li>
                 <li><strong>Best Week:</strong> Highest 7-day rolling window points total</li>
                 <li><strong>Boom%:</strong> Percentage of weeks scoring 90th percentile or higher</li>
                 <li><strong>TEAR3/TEAR4:</strong> Multi-game hot streak rates (3+ or 4+ consecutive elite games)</li>
@@ -70,7 +71,8 @@
                         <th class="sortable" data-sort="player_name">Player Name</th>
                         <th class="sortable" data-sort="bestball_score">BB Score</th>
                         <th class="sortable" data-sort="useful_points_total">Useful Pts</th>
-                        <th class="sortable" data-sort="useful_weeks_pct">Useful%</th>
+                        <th class="sortable" data-sort="useful_weeks_count">Useful Wks</th>
+                        <th class="sortable" data-sort="useful_points_per_week">Pts/Wk</th>
                         <th class="sortable" data-sort="best_week">Best Week</th>
                         <th class="sortable" data-sort="boom_week_rate">Boom%</th>
                         <th class="sortable" data-sort="tear3_rate">TEAR3</th>
@@ -79,7 +81,7 @@
                 </thead>
                 <tbody id="players-tbody">
                     <tr>
-                        <td colspan="8" class="no-data">Click "Load Players" to view data</td>
+                        <td colspan="9" class="no-data">Click "Load Players" to view data</td>
                     </tr>
                 </tbody>
             </table>

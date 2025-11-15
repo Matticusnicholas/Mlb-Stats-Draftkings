@@ -105,7 +105,8 @@ function renderTable() {
         const stats = [
             { key: 'bestball_score', decimals: 1 },
             { key: 'useful_points_total', decimals: 1 },
-            { key: 'useful_weeks_pct', decimals: 1 },
+            { key: 'useful_weeks_count', decimals: 0 },
+            { key: 'useful_points_per_week', decimals: 1 },
             { key: 'best_week', decimals: 1 },
             { key: 'boom_week_rate', decimals: 1 },
             { key: 'tear3_rate', decimals: 1 },
