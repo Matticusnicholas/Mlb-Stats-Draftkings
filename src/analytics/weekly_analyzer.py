@@ -29,6 +29,89 @@ class WeeklyAnalyzer:
         """
         self.db = db_manager
 
+    def get_player_sequential_weeks(
+        self,
+        player_id: int,
+        stats_type: str = "batting",
+        days_per_week: int = 7
+    ) -> pd.DataFrame:
+        """
+        Get NON-OVERLAPPING sequential weekly totals for a player.
+
+        Divides the season into sequential 7-day chunks (like actual weeks).
+        Each day appears in exactly ONE week - no overlap.
+
+        Args:
+            player_id: MLB player ID
+            stats_type: 'batting' or 'pitching'
+            days_per_week: Days per week (default 7)
+
+        Returns:
+            DataFrame with columns: week_num, start_date, end_date, week_points, games_in_week
+        """
+        session = self.db.get_session()
+        try:
+            player_games = self.db.get_player_games(player_id, stats_type)
+
+            if len(player_games) == 0:
+                return pd.DataFrame()
+
+            # Get game data with dates
+            from ..database.models import Game
+            data = []
+            for pg in player_games:
+                game = session.query(Game).filter(Game.game_pk == pg.game_pk).first()
+                if game:
+                    data.append({
+                        'date': game.game_date.date(),
+                        'points': pg.dk_points,
+                        'game_pk': pg.game_pk
+                    })
+
+            if not data:
+                return pd.DataFrame()
+
+            df = pd.DataFrame(data)
+            df = df.sort_values('date').reset_index(drop=True)
+
+            # Find season start and divide into sequential weeks
+            season_start = df['date'].min()
+            season_end = df['date'].max()
+
+            # Create non-overlapping weekly buckets
+            weeks = []
+            current_week_start = season_start
+            week_num = 1
+
+            while current_week_start <= season_end:
+                current_week_end = current_week_start + timedelta(days=days_per_week-1)
+
+                # Get all games in this specific week
+                week_games = df[
+                    (df['date'] >= current_week_start) &
+                    (df['date'] <= current_week_end)
+                ]
+
+                # Only add weeks with at least one game
+                if len(week_games) > 0:
+                    weeks.append({
+                        'week_num': week_num,
+                        'start_date': current_week_start,
+                        'end_date': current_week_end,
+                        'week_points': week_games['points'].sum(),
+                        'games_in_week': len(week_games),
+                        'avg_per_game': week_games['points'].mean()
+                    })
+
+                # Move to next non-overlapping week
+                current_week_start = current_week_end + timedelta(days=1)
+                week_num += 1
+
+            return pd.DataFrame(weeks)
+
+        finally:
+            session.close()
+
     def get_player_rolling_windows(
         self,
         player_id: int,
@@ -261,27 +344,42 @@ class WeeklyAnalyzer:
         metrics['top5_weeks_pct'] = (top5_sum / total_sum * 100) if total_sum > 0 else 0
 
         # USEFUL points metric - only count weeks worthy of starting lineup
+        # Uses NON-OVERLAPPING sequential weeks (not rolling windows)
         # Threshold based on top 100-150 players' weekly scores (70th percentile)
         # This represents "starting worthy" performance in a competitive league
-        useful_threshold = self._get_useful_threshold(stats_type)
-        useful_weeks_mask = window_points >= useful_threshold
-        useful_weeks = window_points[useful_weeks_mask]
+        sequential_weeks_df = self.get_player_sequential_weeks(player_id, stats_type, days_per_week=7)
 
-        metrics['useful_threshold'] = float(useful_threshold)
-        metrics['useful_points_total'] = float(np.sum(useful_weeks)) if len(useful_weeks) > 0 else 0
-        metrics['useful_weeks_count'] = int(np.sum(useful_weeks_mask))
-        metrics['useful_weeks_pct'] = float(np.sum(useful_weeks_mask) / len(window_points) * 100) if len(window_points) > 0 else 0
+        if not sequential_weeks_df.empty:
+            sequential_week_points = sequential_weeks_df['week_points'].values
+            useful_threshold = self._get_useful_threshold(stats_type)
+            useful_weeks_mask = sequential_week_points >= useful_threshold
+            useful_weeks = sequential_week_points[useful_weeks_mask]
 
-        # Wasted points (points from non-starting-worthy weeks)
-        wasted_weeks = window_points[~useful_weeks_mask]
-        metrics['wasted_points'] = float(np.sum(wasted_weeks)) if len(wasted_weeks) > 0 else 0
-        metrics['wasted_weeks_count'] = int(len(wasted_weeks))
+            metrics['useful_threshold'] = float(useful_threshold)
+            metrics['useful_points_total'] = float(np.sum(useful_weeks)) if len(useful_weeks) > 0 else 0
+            metrics['useful_weeks_count'] = int(np.sum(useful_weeks_mask))
+            metrics['useful_weeks_pct'] = float(np.sum(useful_weeks_mask) / len(sequential_week_points) * 100) if len(sequential_week_points) > 0 else 0
 
-        # Efficiency: what % of total points came from starting-worthy weeks
-        metrics['useful_efficiency'] = float((metrics['useful_points_total'] / total_sum * 100)) if total_sum > 0 else 0
+            # Wasted points (points from non-starting-worthy weeks)
+            wasted_weeks = sequential_week_points[~useful_weeks_mask]
+            metrics['wasted_points'] = float(np.sum(wasted_weeks)) if len(wasted_weeks) > 0 else 0
+            metrics['wasted_weeks_count'] = int(len(wasted_weeks))
 
-        # Concentration: average points per useful week (spike-iness of useful production)
-        metrics['useful_points_per_week'] = float(metrics['useful_points_total'] / metrics['useful_weeks_count']) if metrics['useful_weeks_count'] > 0 else 0
+            # Efficiency: what % of total points came from starting-worthy weeks
+            metrics['useful_efficiency'] = float((metrics['useful_points_total'] / total_sum * 100)) if total_sum > 0 else 0
+
+            # Concentration: average points per useful week (spike-iness of useful production)
+            metrics['useful_points_per_week'] = float(metrics['useful_points_total'] / metrics['useful_weeks_count']) if metrics['useful_weeks_count'] > 0 else 0
+        else:
+            # No sequential weeks data
+            metrics['useful_threshold'] = 0.0
+            metrics['useful_points_total'] = 0.0
+            metrics['useful_weeks_count'] = 0
+            metrics['useful_weeks_pct'] = 0.0
+            metrics['wasted_points'] = 0.0
+            metrics['wasted_weeks_count'] = 0
+            metrics['useful_efficiency'] = 0.0
+            metrics['useful_points_per_week'] = 0.0
 
         # TEAR metrics
         tear_metrics = self.calculate_tear_metrics(player_id, stats_type)
@@ -300,7 +398,7 @@ class WeeklyAnalyzer:
         """
         Calculate league-wide "starting worthy" threshold for WEEKLY performance.
 
-        Uses 70th percentile of 7-day rolling window scores from top players.
+        Uses 70th percentile of NON-OVERLAPPING sequential weekly scores from top players.
 
         Args:
             stats_type: 'batting' or 'pitching'
@@ -342,13 +440,13 @@ class WeeklyAnalyzer:
 
                 player_ids = [p[0] for p in top_players]
 
-            # Collect weekly (7-day rolling) scores from these players
+            # Collect SEQUENTIAL weekly scores from these players (non-overlapping)
             all_weekly_scores = []
 
             for player_id in player_ids:
-                rolling_df = self.get_player_rolling_windows(player_id, stats_type, window_days=7)
-                if not rolling_df.empty:
-                    all_weekly_scores.extend(rolling_df['window_points'].values.tolist())
+                sequential_df = self.get_player_sequential_weeks(player_id, stats_type, days_per_week=7)
+                if not sequential_df.empty:
+                    all_weekly_scores.extend(sequential_df['week_points'].values.tolist())
 
             if not all_weekly_scores or len(all_weekly_scores) < 10:
                 logger.warning(f"Insufficient weekly data for threshold, using fallback")
