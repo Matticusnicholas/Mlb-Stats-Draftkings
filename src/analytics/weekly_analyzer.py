@@ -296,15 +296,15 @@ class WeeklyAnalyzer:
 
         return metrics
 
-    def _get_useful_threshold(self, stats_type: str = "batting") -> float:
+    def _get_useful_threshold(self, stats_type: str = "batting", player_id_list: List[int] = None) -> float:
         """
-        Calculate league-wide "starting worthy" threshold.
+        Calculate league-wide "starting worthy" threshold for WEEKLY performance.
 
-        Gets top 100-150 players' weekly scores and uses 70th percentile
-        as the threshold for a "useful" (starting-worthy) week.
+        Uses 70th percentile of 7-day rolling window scores from top players.
 
         Args:
             stats_type: 'batting' or 'pitching'
+            player_id_list: Optional list of player IDs to use (from get_top_bestball_players)
 
         Returns:
             Weekly point threshold for starting-worthy performance
@@ -314,52 +314,65 @@ class WeeklyAnalyzer:
         if hasattr(self, cache_key):
             return getattr(self, cache_key)
 
-        # Get top players by game count
         session = self.db.get_session()
         try:
             from sqlalchemy import func
             from ..database.models import PlayerGame
 
-            # Get players with most games (top ~150)
-            top_players = session.query(
-                PlayerGame.player_id,
-                func.count(PlayerGame.game_pk).label('game_count')
-            ).filter(
-                PlayerGame.stats_type == stats_type
-            ).group_by(
-                PlayerGame.player_id
-            ).having(
-                func.count(PlayerGame.game_pk) >= 20
-            ).order_by(
-                func.count(PlayerGame.game_pk).desc()
-            ).limit(150).all()
+            # If we have a player list from get_top_bestball_players, use it
+            # Otherwise get top 50 players by game count (much smaller subset for speed)
+            if player_id_list:
+                player_ids = player_id_list[:50]  # Use first 50 from the list
+            else:
+                top_players = session.query(
+                    PlayerGame.player_id
+                ).filter(
+                    PlayerGame.stats_type == stats_type
+                ).group_by(
+                    PlayerGame.player_id
+                ).having(
+                    func.count(PlayerGame.game_pk) >= 20
+                ).order_by(
+                    func.count(PlayerGame.game_pk).desc()
+                ).limit(50).all()
 
-            if not top_players:
-                # Fallback if no data
-                return 25.0 if stats_type == "batting" else 30.0
+                if not top_players:
+                    logger.warning(f"No players found for USEFUL threshold, using fallback")
+                    return 35.0 if stats_type == "batting" else 40.0
 
-            # Collect all weekly scores from these top players
+                player_ids = [p[0] for p in top_players]
+
+            # Collect weekly (7-day rolling) scores from these players
             all_weekly_scores = []
 
-            for player_id, _ in top_players:
+            for player_id in player_ids:
                 rolling_df = self.get_player_rolling_windows(player_id, stats_type, window_days=7)
                 if not rolling_df.empty:
-                    all_weekly_scores.extend(rolling_df['window_points'].values)
+                    all_weekly_scores.extend(rolling_df['window_points'].values.tolist())
 
-            if not all_weekly_scores:
-                # Fallback
-                return 25.0 if stats_type == "batting" else 30.0
+            if not all_weekly_scores or len(all_weekly_scores) < 10:
+                logger.warning(f"Insufficient weekly data for threshold, using fallback")
+                return 35.0 if stats_type == "batting" else 40.0
 
-            # Use 70th percentile as "starting worthy" threshold
-            # This means if your week is in top 30% of all weeks, it's useful
+            # Use 70th percentile of weekly totals
+            # This represents a "starting worthy" week
             threshold = float(np.percentile(all_weekly_scores, 70))
+
+            # Sanity check - weekly totals should be higher than single game
+            if threshold < 15.0:
+                logger.warning(f"Calculated weekly threshold too low ({threshold:.2f}), using minimum")
+                threshold = 30.0 if stats_type == "batting" else 35.0
 
             # Cache for this instance
             setattr(self, cache_key, threshold)
 
-            logger.info(f"Calculated USEFUL threshold for {stats_type}: {threshold:.2f} pts (70th percentile)")
+            logger.info(f"Calculated USEFUL threshold for {stats_type}: {threshold:.2f} pts/week (70th percentile from {len(all_weekly_scores)} weekly windows)")
 
             return threshold
+
+        except Exception as e:
+            logger.error(f"Error calculating USEFUL threshold: {e}")
+            return 35.0 if stats_type == "batting" else 40.0
 
         finally:
             session.close()
@@ -518,6 +531,10 @@ class WeeklyAnalyzer:
 
             logger.info(f"Calculating Best Ball metrics for {total_players} players...")
 
+            # Pre-calculate USEFUL threshold once for all players (efficiency optimization)
+            logger.info(f"Pre-calculating USEFUL threshold for {stats_type}...")
+            _ = self._get_useful_threshold(stats_type, player_ids)
+
             # Calculate weekly metrics for each
             player_scores = []
 
@@ -545,7 +562,15 @@ class WeeklyAnalyzer:
                                 'tear3_rate': metrics['tear3_rate'],
                                 'tear4_rate': metrics['tear4_rate'],
                                 'longest_tear': metrics['longest_tear'],
-                                'mean_week_points': metrics['mean_week_points']
+                                'mean_week_points': metrics['mean_week_points'],
+                                # USEFUL metrics
+                                'useful_points_total': metrics.get('useful_points_total', 0),
+                                'useful_weeks_count': metrics.get('useful_weeks_count', 0),
+                                'useful_weeks_pct': metrics.get('useful_weeks_pct', 0),
+                                'useful_points_per_week': metrics.get('useful_points_per_week', 0),
+                                'useful_efficiency': metrics.get('useful_efficiency', 0),
+                                'useful_threshold': metrics.get('useful_threshold', 0),
+                                'wasted_points': metrics.get('wasted_points', 0)
                             })
 
                 except Exception as e:
