@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MLB Best Ball Analyzer - Baseball Savant Style</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>MLB Best Ball Analyzer</h1>
+            <p class="subtitle">Advanced volatility metrics for DraftKings Best Ball snake drafts</p>
+        </header>
+
+        <!-- Filters -->
+        <div class="filters-section">
+            <div class="filter-group">
+                <label for="stats-type">Position:</label>
+                <select id="stats-type" class="filter-select">
+                    <option value="batting">Batting</option>
+                    <option value="pitching">Pitching</option>
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <label for="min-games">Min Games:</label>
+                <input type="number" id="min-games" class="filter-input" value="20" min="5" max="100">
+            </div>
+
+            <div class="filter-group">
+                <label for="limit">Max Players:</label>
+                <select id="limit" class="filter-select">
+                    <option value="50">50</option>
+                    <option value="100" selected>100</option>
+                    <option value="200">200</option>
+                    <option value="300">300</option>
+                </select>
+            </div>
+
+            <button id="load-btn" class="btn-primary">Load Players</button>
+            <button id="refresh-btn" class="btn-secondary">Refresh Data</button>
+        </div>
+
+        <!-- Loading indicator -->
+        <div id="loading" class="loading hidden">
+            <div class="spinner"></div>
+            <p>Loading player data...</p>
+        </div>
+
+        <!-- Stats info -->
+        <div class="info-box">
+            <h3>Best Ball Metrics Explained:</h3>
+            <ul>
+                <li><strong>BB Score:</strong> Composite 0-100 metric combining best week, consistency, and TEAR ability</li>
+                <li><strong>Best Week:</strong> Highest 7-day rolling window points total</li>
+                <li><strong>Top3 Avg:</strong> Average of top 3 best weeks</li>
+                <li><strong>Boom%:</strong> Percentage of weeks scoring 75th percentile or higher</li>
+                <li><strong>TEAR3/TEAR4:</strong> Multi-game hot streak rates (3+ or 4+ consecutive elite games)</li>
+                <li><strong>Longest:</strong> Longest streak of consecutive elite performances</li>
+            </ul>
+        </div>
+
+        <!-- Player table -->
+        <div class="table-container">
+            <table id="players-table" class="players-table">
+                <thead>
+                    <tr>
+                        <th class="sortable" data-sort="player_name">Player Name</th>
+                        <th class="sortable" data-sort="bestball_score">BB Score</th>
+                        <th class="sortable" data-sort="best_week">Best Week</th>
+                        <th class="sortable" data-sort="top3_weeks_avg">Top3 Avg</th>
+                        <th class="sortable" data-sort="boom_week_rate">Boom%</th>
+                        <th class="sortable" data-sort="tear3_rate">TEAR3</th>
+                        <th class="sortable" data-sort="tear4_rate">TEAR4</th>
+                        <th class="sortable" data-sort="longest_tear">Longest</th>
+                    </tr>
+                </thead>
+                <tbody id="players-tbody">
+                    <tr>
+                        <td colspan="8" class="no-data">Click "Load Players" to view data</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>MLB Best Ball Analyzer • Data from MLB Stats API • DraftKings scoring</p>
+            <p id="db-stats"></p>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

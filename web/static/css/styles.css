@@ -1,0 +1,335 @@
+/* Baseball Savant-inspired styling for MLB Best Ball Analyzer */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    --primary-color: #041E42;  /* Dark blue like Baseball Savant */
+    --secondary-color: #C8102E; /* Red accent */
+    --background: #f5f5f5;
+    --card-background: #ffffff;
+    --text-primary: #333333;
+    --text-secondary: #666666;
+    --border-color: #e0e0e0;
+
+    /* Percentile colors - blue (cold) to red (hot) */
+    --percentile-0: #4575b4;
+    --percentile-20: #74add1;
+    --percentile-40: #abd9e9;
+    --percentile-60: #fee090;
+    --percentile-80: #fdae61;
+    --percentile-100: #d73027;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: var(--background);
+    color: var(--text-primary);
+    line-height: 1.6;
+}
+
+.container {
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+/* Header */
+.header {
+    background: linear-gradient(135deg, var(--primary-color) 0%, #062a52 100%);
+    color: white;
+    padding: 40px 30px;
+    border-radius: 10px;
+    margin-bottom: 30px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.header h1 {
+    font-size: 2.5em;
+    margin-bottom: 10px;
+    font-weight: 600;
+}
+
+.subtitle {
+    font-size: 1.1em;
+    opacity: 0.9;
+}
+
+/* Filters Section */
+.filters-section {
+    background: var(--card-background);
+    padding: 25px;
+    border-radius: 8px;
+    margin-bottom: 25px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    display: flex;
+    gap: 20px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+}
+
+.filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.filter-group label {
+    font-weight: 600;
+    font-size: 0.9em;
+    color: var(--text-secondary);
+}
+
+.filter-select,
+.filter-input {
+    padding: 10px 15px;
+    border: 2px solid var(--border-color);
+    border-radius: 5px;
+    font-size: 1em;
+    min-width: 120px;
+    transition: border-color 0.3s;
+}
+
+.filter-select:focus,
+.filter-input:focus {
+    outline: none;
+    border-color: var(--primary-color);
+}
+
+.btn-primary,
+.btn-secondary {
+    padding: 10px 25px;
+    border: none;
+    border-radius: 5px;
+    font-size: 1em;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.btn-primary {
+    background-color: var(--primary-color);
+    color: white;
+}
+
+.btn-primary:hover {
+    background-color: #062a52;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.btn-secondary {
+    background-color: var(--secondary-color);
+    color: white;
+}
+
+.btn-secondary:hover {
+    background-color: #a00d24;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* Loading */
+.loading {
+    text-align: center;
+    padding: 40px;
+}
+
+.hidden {
+    display: none !important;
+}
+
+.spinner {
+    border: 4px solid var(--border-color);
+    border-top: 4px solid var(--primary-color);
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 20px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Info Box */
+.info-box {
+    background: var(--card-background);
+    padding: 20px 25px;
+    border-radius: 8px;
+    margin-bottom: 25px;
+    border-left: 4px solid var(--secondary-color);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.info-box h3 {
+    color: var(--primary-color);
+    margin-bottom: 15px;
+}
+
+.info-box ul {
+    list-style: none;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 10px;
+}
+
+.info-box li {
+    padding: 5px 0;
+    font-size: 0.95em;
+}
+
+/* Table Container */
+.table-container {
+    background: var(--card-background);
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    overflow-x: auto;
+    margin-bottom: 30px;
+}
+
+/* Players Table */
+.players-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.players-table thead {
+    background: var(--primary-color);
+    color: white;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.players-table th {
+    padding: 15px 12px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.95em;
+    border-bottom: 2px solid var(--border-color);
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+}
+
+.players-table th.sortable:hover {
+    background-color: #062a52;
+}
+
+.players-table th.sorted-asc::after {
+    content: ' ▲';
+    color: var(--secondary-color);
+}
+
+.players-table th.sorted-desc::after {
+    content: ' ▼';
+    color: var(--secondary-color);
+}
+
+.players-table tbody tr {
+    border-bottom: 1px solid var(--border-color);
+    transition: background-color 0.2s;
+}
+
+.players-table tbody tr:hover {
+    background-color: #f8f8f8;
+}
+
+.players-table td {
+    padding: 12px;
+    font-size: 0.9em;
+}
+
+.players-table td.no-data {
+    text-align: center;
+    padding: 40px;
+    color: var(--text-secondary);
+    font-style: italic;
+}
+
+/* Player name column */
+.player-name {
+    font-weight: 600;
+    color: var(--primary-color);
+}
+
+/* Stat cell with percentile bar */
+.stat-cell {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.stat-value {
+    min-width: 50px;
+    font-weight: 600;
+}
+
+.percentile-bar-container {
+    flex: 1;
+    height: 20px;
+    background-color: #f0f0f0;
+    border-radius: 3px;
+    overflow: hidden;
+    position: relative;
+}
+
+.percentile-bar {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.5s ease;
+}
+
+/* Percentile bar colors - gradient from blue (low) to red (high) */
+.percentile-0-20 { background: linear-gradient(90deg, var(--percentile-0), var(--percentile-20)); }
+.percentile-20-40 { background: linear-gradient(90deg, var(--percentile-20), var(--percentile-40)); }
+.percentile-40-60 { background: linear-gradient(90deg, var(--percentile-40), var(--percentile-60)); }
+.percentile-60-80 { background: linear-gradient(90deg, var(--percentile-60), var(--percentile-80)); }
+.percentile-80-100 { background: linear-gradient(90deg, var(--percentile-80), var(--percentile-100)); }
+
+/* Footer */
+.footer {
+    text-align: center;
+    padding: 20px;
+    color: var(--text-secondary);
+    font-size: 0.9em;
+}
+
+.footer p {
+    margin: 5px 0;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .header h1 {
+        font-size: 1.8em;
+    }
+
+    .filters-section {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .filter-group {
+        width: 100%;
+    }
+
+    .info-box ul {
+        grid-template-columns: 1fr;
+    }
+
+    .players-table {
+        font-size: 0.85em;
+    }
+
+    .players-table th,
+    .players-table td {
+        padding: 8px 6px;
+    }
+}
