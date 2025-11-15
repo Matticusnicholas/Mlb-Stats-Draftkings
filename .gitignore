@@ -30,6 +30,9 @@ wheels/
 data/*.db
 data/*.sqlite
 
+# Exception: Allow the main MLB stats database to be tracked
+!data/mlb_stats.db
+
 # IDE
 .vscode/
 .idea/
