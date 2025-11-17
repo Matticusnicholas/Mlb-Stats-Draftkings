@@ -361,7 +361,8 @@ class MLBVolatilityGUI:
         player_frame.columnconfigure(0, weight=1)
 
         # Create treeview (will be configured based on mode)
-        self.player_tree = ttk.Treeview(player_frame, show="headings", height=15)
+        # Use "tree headings" to show +/- expand buttons
+        self.player_tree = ttk.Treeview(player_frame, show="tree headings", height=15)
 
         # Configure color tags for percentile-based coloring
         self._configure_color_tags()
@@ -376,8 +377,14 @@ class MLBVolatilityGUI:
         self.player_tree.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
 
-        # Double-click to view details
-        self.player_tree.bind("<Double-1>", self._show_player_details)
+        # Store player data by tree item ID for expandable rows
+        self.player_data_by_item = {}
+
+        # Double-click to toggle expandable details
+        self.player_tree.bind("<Double-1>", self._toggle_player_details)
+
+        # Store expanded items
+        self.expanded_items = set()
 
     def _configure_color_tags(self):
         """Configure color tags for percentile-based visualization."""
@@ -840,9 +847,11 @@ class MLBVolatilityGUI:
                             self.current_player_pool, numeric_cols, value_keys
                         )
 
-                        # Populate tree with percentile bars
-                        for row in display_rows:
-                            self.player_tree.insert("", tk.END, values=row)
+                        # Populate tree with percentile bars and store player data
+                        self.player_data_by_item = {}  # Reset player data mapping
+                        for i, row in enumerate(display_rows):
+                            item_id = self.player_tree.insert("", tk.END, values=row)
+                            self.player_data_by_item[item_id] = self.current_player_pool[i]
 
                         self.status_var.set(f"Loaded {len(self.current_player_pool)} Best Ball players")
                         progress_win.destroy()
@@ -864,8 +873,64 @@ class MLBVolatilityGUI:
         thread = threading.Thread(target=load_in_background, daemon=True)
         thread.start()
 
+    def _toggle_player_details(self, event):
+        """Toggle expandable season stats below player row."""
+        selection = self.player_tree.selection()
+        if not selection:
+            return
+
+        item_id = selection[0]
+
+        # Check if this item has children (already expanded)
+        children = self.player_tree.get_children(item_id)
+
+        if children:
+            # Collapse - remove children
+            for child in children:
+                self.player_tree.delete(child)
+            self.expanded_items.discard(item_id)
+        else:
+            # Expand - add season stats as child row
+            player = self.player_data_by_item.get(item_id)
+            if not player:
+                return
+
+            # Get total season stats
+            session = self.db.get_session()
+            try:
+                from src.database.models import PlayerGame
+                from sqlalchemy import func
+
+                stats = session.query(
+                    func.count(PlayerGame.id).label('games'),
+                    func.sum(PlayerGame.dk_points).label('total_pts'),
+                    func.avg(PlayerGame.dk_points).label('avg_pts'),
+                    func.max(PlayerGame.dk_points).label('max_pts')
+                ).filter(
+                    PlayerGame.player_id == player['player_id'],
+                    PlayerGame.stats_type == self.stats_type_var.get()
+                ).first()
+
+                if stats:
+                    # Format season stats display
+                    season_display = f"  ➤ Season: {stats.games} G, {stats.total_pts:.1f} Tot Pts, {stats.avg_pts:.1f} Avg, {stats.max_pts:.1f} Max"
+
+                    # For pitchers, add start levels
+                    if self.stats_type_var.get() == "pitching":
+                        l1 = player.get('level1_starts', 0)
+                        l2 = player.get('level2_starts', 0)
+                        l3 = player.get('level3_starts', 0)
+                        season_display += f"  |  L1: {l1}, L2: {l2}, L3: {l3} starts"
+
+                    # Insert child row with season stats
+                    self.player_tree.insert(item_id, tk.END, values=[season_display] + [""] * (len(self.player_tree['columns']) - 1))
+                    self.expanded_items.add(item_id)
+
+            finally:
+                session.close()
+
     def _show_player_details(self, event):
-        """Show detailed player statistics."""
+        """Show detailed player statistics in right panel."""
         selection = self.player_tree.selection()
         if not selection:
             return
@@ -873,6 +938,14 @@ class MLBVolatilityGUI:
         # Get selected player
         item = self.player_tree.item(selection[0])
         player_name = item['values'][0]
+
+        # Handle if clicked on child row (season stats)
+        if player_name.strip().startswith("➤"):
+            # Get parent item
+            parent = self.player_tree.parent(selection[0])
+            if parent:
+                item = self.player_tree.item(parent)
+                player_name = item['values'][0]
 
         # Find player in pool
         player = next((p for p in self.current_player_pool if p['player_name'] == player_name), None)
@@ -912,6 +985,16 @@ class MLBVolatilityGUI:
             self.roster_text.insert(tk.END, f"  TEAR3 Rate:            {player['tear3_rate']:.1f} per 100 games\n")
             self.roster_text.insert(tk.END, f"  TEAR4 Rate:            {player['tear4_rate']:.1f} per 100 games\n")
             self.roster_text.insert(tk.END, f"  Longest Tear:          {player['longest_tear']} consecutive hot games\n\n")
+
+            # Pitcher Start Levels (if pitching)
+            if self.stats_type_var.get() == "pitching" and 'level1_starts' in player:
+                self.roster_text.insert(tk.END, "START LEVELS (Elite Start Clustering):\n")
+                self.roster_text.insert(tk.END, f"  Level 1 (Top 30%):     {player.get('level1_starts', 0)} starts ({player.get('level1_rate', 0):.1f}%)\n")
+                self.roster_text.insert(tk.END, f"    Avg Points:          {player.get('level1_avg_pts', 0):.1f} pts\n")
+                self.roster_text.insert(tk.END, f"  Level 2 (Top 20%):     {player.get('level2_starts', 0)} starts ({player.get('level2_rate', 0):.1f}%)\n")
+                self.roster_text.insert(tk.END, f"    Avg Points:          {player.get('level2_avg_pts', 0):.1f} pts\n")
+                self.roster_text.insert(tk.END, f"  Level 3 (Top 10%):     {player.get('level3_starts', 0)} starts ({player.get('level3_rate', 0):.1f}%)\n")
+                self.roster_text.insert(tk.END, f"    Avg Points:          {player.get('level3_avg_pts', 0):.1f} pts\n\n")
 
             self.roster_text.insert(tk.END, "BEST BALL STRATEGY:\n")
             if player['bestball_score'] >= 70:

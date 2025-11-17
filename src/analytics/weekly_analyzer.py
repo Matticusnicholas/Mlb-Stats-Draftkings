@@ -385,6 +385,11 @@ class WeeklyAnalyzer:
         tear_metrics = self.calculate_tear_metrics(player_id, stats_type)
         metrics.update(tear_metrics)
 
+        # Pitcher Start Levels (for pitchers only)
+        if stats_type == "pitching":
+            start_levels = self.calculate_start_levels(player_id, stats_type)
+            metrics.update(start_levels)
+
         # Weekly consistency score (inverse - lower = more volatile = better for best ball)
         cv = metrics['std_week_points'] / metrics['mean_week_points'] if metrics['mean_week_points'] > 0 else 0
         metrics['weekly_cv'] = float(cv)
@@ -393,6 +398,74 @@ class WeeklyAnalyzer:
         metrics['bestball_score'] = self._calculate_bestball_score(metrics)
 
         return metrics
+
+    def calculate_start_levels(
+        self,
+        player_id: int,
+        stats_type: str = "pitching"
+    ) -> Dict:
+        """
+        Calculate pitcher start levels - clustering of elite starts.
+
+        Level 1: Top 30% of starts (70th percentile+)
+        Level 2: Top 20% of starts (80th percentile+)
+        Level 3: Top 10% of starts (90th percentile+)
+
+        Args:
+            player_id: MLB player ID
+            stats_type: 'batting' or 'pitching' (primarily for pitchers)
+
+        Returns:
+            Dictionary with L1/L2/L3 start counts, rates, and average points
+        """
+        player_games = self.db.get_player_games(player_id, stats_type)
+
+        if len(player_games) < 5:
+            return {
+                'level1_starts': 0,
+                'level2_starts': 0,
+                'level3_starts': 0,
+                'level1_rate': 0.0,
+                'level2_rate': 0.0,
+                'level3_rate': 0.0,
+                'level1_avg_pts': 0.0,
+                'level2_avg_pts': 0.0,
+                'level3_avg_pts': 0.0
+            }
+
+        # Get all DK points from games
+        points = np.array([pg.dk_points for pg in player_games])
+
+        # Calculate percentile thresholds
+        p70 = np.percentile(points, 70)  # Level 1: Top 30%
+        p80 = np.percentile(points, 80)  # Level 2: Top 20%
+        p90 = np.percentile(points, 90)  # Level 3: Top 10%
+
+        # Count starts at each level
+        level1_mask = points >= p70
+        level2_mask = points >= p80
+        level3_mask = points >= p90
+
+        level1_starts = points[level1_mask]
+        level2_starts = points[level2_mask]
+        level3_starts = points[level3_mask]
+
+        total_starts = len(points)
+
+        return {
+            'level1_starts': int(np.sum(level1_mask)),
+            'level2_starts': int(np.sum(level2_mask)),
+            'level3_starts': int(np.sum(level3_mask)),
+            'level1_rate': float(np.sum(level1_mask) / total_starts * 100) if total_starts > 0 else 0.0,
+            'level2_rate': float(np.sum(level2_mask) / total_starts * 100) if total_starts > 0 else 0.0,
+            'level3_rate': float(np.sum(level3_mask) / total_starts * 100) if total_starts > 0 else 0.0,
+            'level1_avg_pts': float(np.mean(level1_starts)) if len(level1_starts) > 0 else 0.0,
+            'level2_avg_pts': float(np.mean(level2_starts)) if len(level2_starts) > 0 else 0.0,
+            'level3_avg_pts': float(np.mean(level3_starts)) if len(level3_starts) > 0 else 0.0,
+            'level1_threshold': float(p70),
+            'level2_threshold': float(p80),
+            'level3_threshold': float(p90)
+        }
 
     def _get_useful_threshold(self, stats_type: str = "batting", player_id_list: List[int] = None) -> float:
         """
@@ -480,7 +553,7 @@ class WeeklyAnalyzer:
         Calculate a composite Best Ball score (0-100).
         Higher = better for best ball formats.
 
-        Heavily weights ceiling weeks and tear potential.
+        Weights ceiling weeks, tear potential, and useful point concentration.
 
         Args:
             metrics: Dictionary of weekly metrics
@@ -503,13 +576,23 @@ class WeeklyAnalyzer:
         # Top 5 weeks concentration (higher = more spike-y)
         concentration_score = min(100, metrics['top5_weeks_pct'])
 
-        # Weighted combination (emphasis on ceiling and tears)
+        # USEFUL metrics - points per useful week (concentration of starting-worthy production)
+        # Higher Pts/Wk = more explosive when they're good
+        useful_concentration = min(100, metrics.get('useful_points_per_week', 0) * 1.2)
+
+        # USEFUL efficiency - what % of total points came from starting-worthy weeks
+        # Higher = less wasted production
+        useful_efficiency = min(100, metrics.get('useful_efficiency', 0))
+
+        # Weighted combination (emphasis on ceiling, tears, and useful concentration)
         bestball_score = (
-            best_week_score * 0.25 +     # Best week ever
-            top3_score * 0.20 +           # Typical ceiling weeks
-            boom_score * 0.20 +           # Boom week frequency
-            tear_score * 0.20 +           # Multi-game tear ability
-            concentration_score * 0.15    # Spike concentration
+            best_week_score * 0.22 +         # Best week ever
+            top3_score * 0.18 +               # Typical ceiling weeks
+            boom_score * 0.18 +               # Boom week frequency
+            tear_score * 0.18 +               # Multi-game tear ability
+            concentration_score * 0.12 +      # Spike concentration
+            useful_concentration * 0.08 +     # Useful point concentration
+            useful_efficiency * 0.04          # Useful efficiency
         )
 
         return round(bestball_score, 2)
@@ -650,7 +733,7 @@ class WeeklyAnalyzer:
                             player = session.query(Player).filter_by(player_id=player_id).first()
 
                         if player:
-                            player_scores.append({
+                            player_dict = {
                                 'player_id': player_id,
                                 'player_name': player.player_name,
                                 'bestball_score': metrics['bestball_score'],
@@ -669,7 +752,23 @@ class WeeklyAnalyzer:
                                 'useful_efficiency': metrics.get('useful_efficiency', 0),
                                 'useful_threshold': metrics.get('useful_threshold', 0),
                                 'wasted_points': metrics.get('wasted_points', 0)
-                            })
+                            }
+
+                            # Add pitcher start levels for pitchers
+                            if stats_type == "pitching":
+                                player_dict.update({
+                                    'level1_starts': metrics.get('level1_starts', 0),
+                                    'level2_starts': metrics.get('level2_starts', 0),
+                                    'level3_starts': metrics.get('level3_starts', 0),
+                                    'level1_rate': metrics.get('level1_rate', 0.0),
+                                    'level2_rate': metrics.get('level2_rate', 0.0),
+                                    'level3_rate': metrics.get('level3_rate', 0.0),
+                                    'level1_avg_pts': metrics.get('level1_avg_pts', 0.0),
+                                    'level2_avg_pts': metrics.get('level2_avg_pts', 0.0),
+                                    'level3_avg_pts': metrics.get('level3_avg_pts', 0.0)
+                                })
+
+                            player_scores.append(player_dict)
 
                 except Exception as e:
                     logger.error(f"Error processing player {player_id}: {e}")
