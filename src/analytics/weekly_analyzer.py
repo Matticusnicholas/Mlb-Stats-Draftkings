@@ -553,7 +553,8 @@ class WeeklyAnalyzer:
         Calculate a composite Best Ball score (0-100).
         Higher = better for best ball formats.
 
-        Weights ceiling weeks, tear potential, and useful point concentration.
+        Emphasizes USEFUL metrics (starting-worthy production) over single-week spikes.
+        For 13 batter / 7 pitcher leagues, consistency matters more than one big week.
 
         Args:
             metrics: Dictionary of weekly metrics
@@ -561,38 +562,37 @@ class WeeklyAnalyzer:
         Returns:
             Best Ball score (0-100)
         """
-        # Best week score (normalized)
-        best_week_score = min(100, metrics['best_week'] * 1.5)
+        # USEFUL metrics - concentration of starting-worthy production
+        # When they're good, HOW good are they?
+        useful_concentration = min(100, metrics.get('useful_points_per_week', 0) * 1.2)
 
-        # Top weeks average
-        top3_score = min(100, metrics['top3_weeks_avg'] * 2)
+        # What % of their weeks are actually starting-worthy?
+        useful_frequency = min(100, metrics.get('useful_weeks_pct', 0) * 1.5)
 
         # Boom week rate (how often they have monster weeks)
         boom_score = min(100, metrics['boom_week_rate'] * 5)
 
-        # TEAR3+ rate (3+ game hot streaks)
+        # TEAR3+ rate (3+ game hot streaks - creates multiple good weeks)
         tear_score = min(100, metrics['tear3_rate'] * 5)
 
-        # Top 5 weeks concentration (higher = more spike-y)
+        # Top weeks average (typical ceiling when they're hot)
+        top3_score = min(100, metrics['top3_weeks_avg'] * 2)
+
+        # Top 5 weeks concentration (spike-iness)
         concentration_score = min(100, metrics['top5_weeks_pct'])
 
-        # USEFUL metrics - points per useful week (concentration of starting-worthy production)
-        # Higher Pts/Wk = more explosive when they're good
-        useful_concentration = min(100, metrics.get('useful_points_per_week', 0) * 1.2)
+        # Best single week (nice to have, but not critical)
+        best_week_score = min(100, metrics['best_week'] * 1.5)
 
-        # USEFUL efficiency - what % of total points came from starting-worthy weeks
-        # Higher = less wasted production
-        useful_efficiency = min(100, metrics.get('useful_efficiency', 0))
-
-        # Weighted combination (emphasis on ceiling, tears, and useful concentration)
+        # Weighted combination - USEFUL and boom/tear frequency dominate
         bestball_score = (
-            best_week_score * 0.22 +         # Best week ever
-            top3_score * 0.18 +               # Typical ceiling weeks
-            boom_score * 0.18 +               # Boom week frequency
-            tear_score * 0.18 +               # Multi-game tear ability
-            concentration_score * 0.12 +      # Spike concentration
-            useful_concentration * 0.08 +     # Useful point concentration
-            useful_efficiency * 0.04          # Useful efficiency
+            useful_concentration * 0.25 +    # Pts per useful week (when good, how good?)
+            useful_frequency * 0.20 +        # % of weeks that are starting-worthy
+            boom_score * 0.20 +              # Elite week frequency
+            tear_score * 0.15 +              # Multi-game hot streak ability
+            top3_score * 0.10 +              # Typical ceiling weeks
+            concentration_score * 0.05 +     # General spike-iness
+            best_week_score * 0.05           # Best week ever (minimal weight)
         )
 
         return round(bestball_score, 2)
