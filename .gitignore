@@ -51,6 +51,7 @@ logs/
 # Cache
 .cache/
 *.cache
+web/cache/
 
 # Environment
 .env

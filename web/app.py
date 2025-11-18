@@ -6,6 +6,8 @@ from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
 import sys
 import os
+import json
+from datetime import datetime
 
 # Add parent directory to path to import from src
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -20,6 +22,46 @@ CORS(app)
 DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'mlb_stats.db')
 db = DatabaseManager(DB_PATH)
 weekly_analyzer = WeeklyAnalyzer(db)
+
+# Cache file paths
+CACHE_DIR = os.path.join(os.path.dirname(__file__), 'cache')
+BATTING_CACHE = os.path.join(CACHE_DIR, 'batting_players.json')
+PITCHING_CACHE = os.path.join(CACHE_DIR, 'pitching_players.json')
+
+# In-memory cache
+_player_cache = {
+    'batting': None,
+    'pitching': None
+}
+
+
+def load_cached_players(stats_type='batting'):
+    """Load pre-calculated players from JSON cache."""
+    cache_file = BATTING_CACHE if stats_type == 'batting' else PITCHING_CACHE
+
+    # Check if cache exists
+    if not os.path.exists(cache_file):
+        print(f"WARNING: Cache file not found: {cache_file}")
+        print("Run 'python web/precalculate_data.py' to generate cache files.")
+        return None
+
+    # Check if already loaded in memory
+    if _player_cache[stats_type] is not None:
+        return _player_cache[stats_type]
+
+    # Load from file
+    try:
+        with open(cache_file, 'r') as f:
+            cache_data = json.load(f)
+
+        players = cache_data.get('players', [])
+        _player_cache[stats_type] = players
+
+        print(f"✓ Loaded {len(players)} {stats_type} players from cache (generated: {cache_data.get('generated_at', 'unknown')})")
+        return players
+    except Exception as e:
+        print(f"ERROR loading cache: {e}")
+        return None
 
 
 @app.route('/')
@@ -38,22 +80,34 @@ def get_players():
         min_games: Minimum games played (default: 20)
         limit: Max players to return (default: 100)
         sort_by: Field to sort by (default: bestball_score)
+        use_cache: Use cached data if available (default: true)
     """
     try:
         stats_type = request.args.get('stats_type', 'batting')
         min_games = int(request.args.get('min_games', 20))
         limit = int(request.args.get('limit', 100))
         sort_by = request.args.get('sort_by', 'bestball_score')
+        use_cache = request.args.get('use_cache', 'true').lower() == 'true'
 
-        # Get player data
-        players = weekly_analyzer.get_top_bestball_players(
-            stats_type=stats_type,
-            min_games=min_games,
-            limit=limit
-        )
+        # Try to load from cache first (MUCH faster)
+        players = None
+        if use_cache:
+            players = load_cached_players(stats_type)
+
+        # Fall back to live calculation if cache not available
+        if players is None:
+            print(f"Cache not available, calculating live (this will be slow)...")
+            players = weekly_analyzer.get_top_bestball_players(
+                stats_type=stats_type,
+                min_games=min_games,
+                limit=limit
+            )
 
         # Sort by requested field
         players.sort(key=lambda x: x.get(sort_by, 0), reverse=True)
+
+        # Apply limit
+        players = players[:limit]
 
         # Calculate percentiles for each stat
         players_with_percentiles = calculate_percentiles(players)
@@ -61,7 +115,8 @@ def get_players():
         return jsonify({
             'success': True,
             'players': players_with_percentiles,
-            'count': len(players_with_percentiles)
+            'count': len(players_with_percentiles),
+            'from_cache': use_cache and _player_cache[stats_type] is not None
         })
 
     except Exception as e:

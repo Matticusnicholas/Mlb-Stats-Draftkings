@@ -278,32 +278,34 @@ class MLBVolatilityGUI:
         for item in self.player_tree.get_children():
             self.player_tree.delete(item)
 
-        # Reconfigure columns
+        # Reconfigure columns - added Draft status
         self.player_tree.configure(columns=(
-            "Name", "BB Score", "Useful Pts", "Useful Wks", "Pts/Wk", "Best Week", "Boom%", "TEAR3", "TEAR4"
+            "Draft", "Name", "BB Score", "Useful Pts", "Useful Wks", "Pts/Wk", "Best Week", "Boom%", "TEAR3", "TEAR4"
         ))
 
         # Set headings with click-to-sort
+        self.player_tree.heading("Draft", text="☑", command=lambda: None)  # Click on row to toggle
         self.player_tree.heading("Name", text="Player Name",
-                                command=lambda: self._sort_by_column("Name", 0, is_numeric=False))
+                                command=lambda: self._sort_by_column("Name", 1, is_numeric=False))
         self.player_tree.heading("BB Score", text="BB Score",
-                                command=lambda: self._sort_by_column("BB Score", 1))
+                                command=lambda: self._sort_by_column("BB Score", 2))
         self.player_tree.heading("Useful Pts", text="Useful Pts",
-                                command=lambda: self._sort_by_column("Useful Pts", 2))
+                                command=lambda: self._sort_by_column("Useful Pts", 3))
         self.player_tree.heading("Useful Wks", text="Useful Wks",
-                                command=lambda: self._sort_by_column("Useful Wks", 3))
+                                command=lambda: self._sort_by_column("Useful Wks", 4))
         self.player_tree.heading("Pts/Wk", text="Pts/Wk",
-                                command=lambda: self._sort_by_column("Pts/Wk", 4))
+                                command=lambda: self._sort_by_column("Pts/Wk", 5))
         self.player_tree.heading("Best Week", text="Best Week",
-                                command=lambda: self._sort_by_column("Best Week", 5))
+                                command=lambda: self._sort_by_column("Best Week", 6))
         self.player_tree.heading("Boom%", text="Boom%",
-                                command=lambda: self._sort_by_column("Boom%", 6))
+                                command=lambda: self._sort_by_column("Boom%", 7))
         self.player_tree.heading("TEAR3", text="TEAR3",
-                                command=lambda: self._sort_by_column("TEAR3", 7))
+                                command=lambda: self._sort_by_column("TEAR3", 8))
         self.player_tree.heading("TEAR4", text="TEAR4",
-                                command=lambda: self._sort_by_column("TEAR4", 8))
+                                command=lambda: self._sort_by_column("TEAR4", 9))
 
         # Set column widths (wider to accommodate percentile bars)
+        self.player_tree.column("Draft", width=40, anchor="center")
         self.player_tree.column("Name", width=150)
         self.player_tree.column("BB Score", width=120)
         self.player_tree.column("Useful Pts", width=120)
@@ -361,8 +363,11 @@ class MLBVolatilityGUI:
         player_frame.columnconfigure(0, weight=1)
 
         # Create treeview (will be configured based on mode)
-        # Use "tree headings" to show +/- expand buttons
+        # Use "tree headings" to show +/- expand buttons and data
         self.player_tree = ttk.Treeview(player_frame, show="tree headings", height=15)
+
+        # Configure tree column (the one with +/- buttons)
+        self.player_tree.column("#0", width=30, minwidth=30, stretch=False)  # Just enough for +/- button
 
         # Configure color tags for percentile-based coloring
         self._configure_color_tags()
@@ -380,6 +385,12 @@ class MLBVolatilityGUI:
         # Store player data by tree item ID for expandable rows
         self.player_data_by_item = {}
 
+        # Track drafted players
+        self.drafted_players = set()
+
+        # Single-click on Draft column to toggle draft status
+        self.player_tree.bind("<Button-1>", self._handle_click)
+
         # Double-click to toggle expandable details
         self.player_tree.bind("<Double-1>", self._toggle_player_details)
 
@@ -396,6 +407,9 @@ class MLBVolatilityGUI:
         self.player_tree.tag_configure('percentile_40_60', background='#ffffff')   # White
         self.player_tree.tag_configure('percentile_20_40', background='#f0f8ff')   # Very light blue
         self.player_tree.tag_configure('percentile_0_20', background='#e6f2ff')    # Light blue
+
+        # Drafted player tag (gray fade with strikethrough look)
+        self.player_tree.tag_configure('drafted', background='#d0d0d0', foreground='#666666')
 
     def _calculate_percentiles(self, column_index: int) -> Dict:
         """
@@ -548,7 +562,10 @@ class MLBVolatilityGUI:
         for player_idx, player in enumerate(data):
             row_values = []
             for col_idx, key in enumerate(value_keys):
-                if col_idx in numeric_columns:
+                # Handle draft placeholder
+                if key == '_draft_placeholder':
+                    row_values.append("")  # Empty draft checkbox initially
+                elif col_idx in numeric_columns:
                     # Add value with percentile bar
                     if key in player:
                         val = player[key]
@@ -839,9 +856,10 @@ class MLBVolatilityGUI:
                         self.current_player_pool = player_pool
 
                         # Prepare data with percentile bars
-                        value_keys = ['player_name', 'bestball_score', 'useful_points_total', 'useful_weeks_count',
+                        # Add empty draft column at beginning
+                        value_keys = ['_draft_placeholder', 'player_name', 'bestball_score', 'useful_points_total', 'useful_weeks_count',
                                      'useful_points_per_week', 'best_week', 'boom_week_rate', 'tear3_rate', 'tear4_rate']
-                        numeric_cols = {1, 2, 3, 4, 5, 6, 7, 8}  # All columns except name
+                        numeric_cols = {2, 3, 4, 5, 6, 7, 8, 9}  # All columns except draft and name
 
                         display_rows = self._apply_percentile_bars_to_data(
                             self.current_player_pool, numeric_cols, value_keys
@@ -872,6 +890,44 @@ class MLBVolatilityGUI:
         # Start background thread
         thread = threading.Thread(target=load_in_background, daemon=True)
         thread.start()
+
+    def _handle_click(self, event):
+        """Handle single click - toggle draft status if clicking Draft column."""
+        # Identify which column was clicked
+        region = self.player_tree.identify("region", event.x, event.y)
+        if region != "cell":
+            return
+
+        column = self.player_tree.identify_column(event.x)
+        item = self.player_tree.identify_row(event.y)
+
+        if not item:
+            return
+
+        # Check if clicked on Draft column (first column after tree column)
+        if column == "#1":  # Draft column
+            self._toggle_draft_status(item)
+            return "break"  # Prevent default selection
+
+    def _toggle_draft_status(self, item_id):
+        """Toggle draft status for a player."""
+        # Get current values
+        values = list(self.player_tree.item(item_id)['values'])
+        player_name = values[1]  # Name is second column now
+
+        # Toggle drafted status
+        if item_id in self.drafted_players:
+            # Un-draft
+            self.drafted_players.discard(item_id)
+            values[0] = ""  # Clear checkbox
+            self.player_tree.item(item_id, values=values, tags=())
+        else:
+            # Draft
+            self.drafted_players.add(item_id)
+            values[0] = "✓"  # Add checkmark
+            self.player_tree.item(item_id, values=values, tags=('drafted',))
+
+        print(f"{'Drafted' if item_id in self.drafted_players else 'Un-drafted'}: {player_name}")
 
     def _toggle_player_details(self, event):
         """Toggle expandable season stats below player row."""
