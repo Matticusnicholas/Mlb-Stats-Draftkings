@@ -782,6 +782,68 @@ class WeeklyAnalyzer:
         finally:
             session.close()
 
+    def get_top_bestball_players_combined(
+        self,
+        min_games: int = 20,
+        limit: int = 100,
+        progress_callback=None
+    ) -> List[Dict]:
+        """
+        Get top players for best ball combining both batting and pitching.
+
+        This creates a unified ranking where hitters and pitchers compete on the
+        same bestball_score metric (0-100). Since hitters play more frequently,
+        they naturally accumulate more USEFUL points and will dominate the rankings.
+
+        Args:
+            min_games: Minimum games required
+            limit: Number of players to return
+            progress_callback: Optional callback function(current, total, player_name, player_type)
+
+        Returns:
+            List of player dictionaries with weekly metrics and player_type field
+        """
+        logger.info("Calculating combined Best Ball rankings (batting + pitching)...")
+
+        # Get batting players
+        logger.info("Fetching batting players...")
+        batting_players = self.get_top_bestball_players(
+            stats_type="batting",
+            min_games=min_games,
+            limit=500,  # Get more than needed so we have a good pool
+            progress_callback=lambda curr, total, name: progress_callback(
+                curr, total * 2, name, "batting"
+            ) if progress_callback else None
+        )
+
+        # Add player_type field to batting players
+        for player in batting_players:
+            player['player_type'] = 'batting'
+
+        # Get pitching players
+        logger.info("Fetching pitching players...")
+        pitching_players = self.get_top_bestball_players(
+            stats_type="pitching",
+            min_games=min_games,
+            limit=500,  # Get more than needed so we have a good pool
+            progress_callback=lambda curr, total, name: progress_callback(
+                curr + total, total * 2, name, "pitching"
+            ) if progress_callback else None
+        )
+
+        # Add player_type field to pitching players
+        for player in pitching_players:
+            player['player_type'] = 'pitching'
+
+        # Combine and sort by bestball_score
+        combined_players = batting_players + pitching_players
+        combined_players.sort(key=lambda x: x['bestball_score'], reverse=True)
+
+        logger.info(f"Combined rankings: {len(batting_players)} hitters + {len(pitching_players)} pitchers = {len(combined_players)} total")
+
+        # Return top N
+        return combined_players[:limit]
+
 
 if __name__ == "__main__":
     # Example usage

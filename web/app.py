@@ -27,17 +27,28 @@ weekly_analyzer = WeeklyAnalyzer(db)
 CACHE_DIR = os.path.join(os.path.dirname(__file__), 'cache')
 BATTING_CACHE = os.path.join(CACHE_DIR, 'batting_players.json')
 PITCHING_CACHE = os.path.join(CACHE_DIR, 'pitching_players.json')
+COMBINED_CACHE = os.path.join(CACHE_DIR, 'combined_players.json')
 
 # In-memory cache
 _player_cache = {
     'batting': None,
-    'pitching': None
+    'pitching': None,
+    'combined': None
 }
 
 
 def load_cached_players(stats_type='batting'):
     """Load pre-calculated players from JSON cache."""
-    cache_file = BATTING_CACHE if stats_type == 'batting' else PITCHING_CACHE
+    # Select appropriate cache file
+    if stats_type == 'batting':
+        cache_file = BATTING_CACHE
+    elif stats_type == 'pitching':
+        cache_file = PITCHING_CACHE
+    elif stats_type == 'combined':
+        cache_file = COMBINED_CACHE
+    else:
+        print(f"WARNING: Unknown stats_type: {stats_type}")
+        return None
 
     # Check if cache exists
     if not os.path.exists(cache_file):
@@ -76,7 +87,7 @@ def get_players():
     Get player data with Best Ball metrics.
 
     Query params:
-        stats_type: 'batting' or 'pitching' (default: batting)
+        stats_type: 'batting', 'pitching', or 'combined' (default: batting)
         min_games: Minimum games played (default: 20)
         limit: Max players to return (default: 100)
         sort_by: Field to sort by (default: bestball_score)
@@ -97,11 +108,19 @@ def get_players():
         # Fall back to live calculation if cache not available
         if players is None:
             print(f"Cache not available, calculating live (this will be slow)...")
-            players = weekly_analyzer.get_top_bestball_players(
-                stats_type=stats_type,
-                min_games=min_games,
-                limit=limit
-            )
+
+            # Use combined method for combined rankings
+            if stats_type == 'combined':
+                players = weekly_analyzer.get_top_bestball_players_combined(
+                    min_games=min_games,
+                    limit=limit
+                )
+            else:
+                players = weekly_analyzer.get_top_bestball_players(
+                    stats_type=stats_type,
+                    min_games=min_games,
+                    limit=limit
+                )
 
         # Sort by requested field
         players.sort(key=lambda x: x.get(sort_by, 0), reverse=True)
@@ -116,7 +135,7 @@ def get_players():
             'success': True,
             'players': players_with_percentiles,
             'count': len(players_with_percentiles),
-            'from_cache': use_cache and _player_cache[stats_type] is not None
+            'from_cache': use_cache and _player_cache.get(stats_type) is not None
         })
 
     except Exception as e:

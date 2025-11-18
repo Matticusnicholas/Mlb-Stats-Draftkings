@@ -7,7 +7,6 @@ critical for best ball formats where your best scores auto-count each week.
 """
 import argparse
 import logging
-from tqdm import tqdm
 
 from src.database.db_manager import DatabaseManager
 from src.analytics.weekly_analyzer import WeeklyAnalyzer
@@ -30,37 +29,61 @@ def analyze_top_bestball_players(
 
     Args:
         analyzer: Weekly analyzer instance
-        stats_type: 'batting' or 'pitching'
+        stats_type: 'batting', 'pitching', or 'combined'
         min_games: Minimum games required
         top_n: Number of top players to show
     """
     logger.info(f"Analyzing top {top_n} best ball {stats_type} players...")
 
-    top_players = analyzer.get_top_bestball_players(
-        stats_type=stats_type,
-        min_games=min_games,
-        limit=top_n
-    )
+    # Use combined method if requested
+    if stats_type == "combined":
+        top_players = analyzer.get_top_bestball_players_combined(
+            min_games=min_games,
+            limit=top_n
+        )
+    else:
+        top_players = analyzer.get_top_bestball_players(
+            stats_type=stats_type,
+            min_games=min_games,
+            limit=top_n
+        )
 
     if not top_players:
         logger.warning("No players found with sufficient data")
         return
 
+    # Determine column widths based on whether we're showing player type
+    show_type = stats_type == "combined"
+    player_name_width = 26 if show_type else 30
+    type_width = 8 if show_type else 0
+
     print("\n" + "="*100)
     print(f"TOP {top_n} BEST BALL {stats_type.upper()} PLAYERS (7-Day Rolling Windows)")
     print("="*100)
-    print(f"{'Rank':<5} {'Player Name':<30} {'BB Score':<9} {'Best Week':<10} "
-          f"{'Top3 Avg':<10} {'Boom%':<8} {'TEAR3':<7} {'TEAR4':<7}")
+
+    # Build header dynamically
+    header = f"{'Rank':<5} {'Player Name':<{player_name_width}}"
+    if show_type:
+        header += f" {'Type':<{type_width}}"
+    header += f" {'BB Score':<9} {'Best Week':<10} {'Top3 Avg':<10} {'Boom%':<8} {'TEAR3':<7} {'TEAR4':<7}"
+    print(header)
     print("-"*100)
 
     for idx, player in enumerate(top_players, 1):
-        print(f"{idx:<5} {player['player_name']:<30} "
-              f"{player['bestball_score']:<9.1f} {player['best_week']:<10.1f} "
-              f"{player['top3_weeks_avg']:<10.1f} {player['boom_week_rate']:<8.1f} "
-              f"{player['tear3_rate']:<7.1f} {player['tear4_rate']:<7.1f}")
+        row = f"{idx:<5} {player['player_name']:<{player_name_width}}"
+        if show_type:
+            player_type = player.get('player_type', 'unknown')
+            type_abbr = 'BAT' if player_type == 'batting' else 'PIT'
+            row += f" {type_abbr:<{type_width}}"
+        row += (f" {player['bestball_score']:<9.1f} {player['best_week']:<10.1f} "
+                f"{player['top3_weeks_avg']:<10.1f} {player['boom_week_rate']:<8.1f} "
+                f"{player['tear3_rate']:<7.1f} {player['tear4_rate']:<7.1f}")
+        print(row)
 
     print("="*100)
     print("\nColumn Definitions:")
+    if show_type:
+        print("  Type        : Player type (BAT=batting, PIT=pitching)")
     print("  BB Score    : Best Ball composite score (0-100, higher = better)")
     print("  Best Week   : Highest 7-day rolling window DK points")
     print("  Top3 Avg    : Average of top 3 weekly scores")
@@ -155,8 +178,8 @@ def main():
         "--stats-type",
         type=str,
         default="batting",
-        choices=["batting", "pitching"],
-        help="Stats type to analyze"
+        choices=["batting", "pitching", "combined"],
+        help="Stats type to analyze (combined ranks all players together)"
     )
     parser.add_argument(
         "--min-games",
