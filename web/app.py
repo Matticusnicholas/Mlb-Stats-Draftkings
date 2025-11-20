@@ -2,42 +2,54 @@
 Flask web application for MLB Best Ball Analyzer.
 Baseball Savant-style interface for Best Ball draft analysis.
 """
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, send_file
 from flask_cors import CORS
 import sys
 import os
 import json
 from datetime import datetime
+import tempfile
 
 # Add parent directory to path to import from src
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from src.database.db_manager import DatabaseManager
 from src.analytics.weekly_analyzer import WeeklyAnalyzer
+from src.utils.export_rankings import RankingsExporter
 
 app = Flask(__name__)
 CORS(app)
 
-# Initialize database and analyzer
+# Initialize database
 DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'mlb_stats.db')
 db = DatabaseManager(DB_PATH)
-weekly_analyzer = WeeklyAnalyzer(db)
 
 # Cache file paths
 CACHE_DIR = os.path.join(os.path.dirname(__file__), 'cache')
 BATTING_CACHE = os.path.join(CACHE_DIR, 'batting_players.json')
 PITCHING_CACHE = os.path.join(CACHE_DIR, 'pitching_players.json')
+COMBINED_CACHE = os.path.join(CACHE_DIR, 'combined_players.json')
 
 # In-memory cache
 _player_cache = {
     'batting': None,
-    'pitching': None
+    'pitching': None,
+    'combined': None
 }
 
 
 def load_cached_players(stats_type='batting'):
     """Load pre-calculated players from JSON cache."""
-    cache_file = BATTING_CACHE if stats_type == 'batting' else PITCHING_CACHE
+    # Select appropriate cache file
+    if stats_type == 'batting':
+        cache_file = BATTING_CACHE
+    elif stats_type == 'pitching':
+        cache_file = PITCHING_CACHE
+    elif stats_type == 'combined':
+        cache_file = COMBINED_CACHE
+    else:
+        print(f"WARNING: Unknown stats_type: {stats_type}")
+        return None
 
     # Check if cache exists
     if not os.path.exists(cache_file):
@@ -76,32 +88,48 @@ def get_players():
     Get player data with Best Ball metrics.
 
     Query params:
-        stats_type: 'batting' or 'pitching' (default: batting)
+        stats_type: 'batting', 'pitching', or 'combined' (default: batting)
+        scoring_system: 'draftkings', 'underdog', or 'drafters' (default: draftkings)
         min_games: Minimum games played (default: 20)
         limit: Max players to return (default: 100)
         sort_by: Field to sort by (default: bestball_score)
-        use_cache: Use cached data if available (default: true)
+        use_cache: Use cached data if available (default: true, only for DraftKings)
     """
     try:
         stats_type = request.args.get('stats_type', 'batting')
+        scoring_system = request.args.get('scoring_system', 'draftkings')
         min_games = int(request.args.get('min_games', 20))
         limit = int(request.args.get('limit', 100))
         sort_by = request.args.get('sort_by', 'bestball_score')
         use_cache = request.args.get('use_cache', 'true').lower() == 'true'
 
-        # Try to load from cache first (MUCH faster)
+        # Cache only available for DraftKings scoring
         players = None
-        if use_cache:
+        if use_cache and scoring_system == 'draftkings':
             players = load_cached_players(stats_type)
 
-        # Fall back to live calculation if cache not available
+        # Fall back to live calculation if cache not available or different scoring system
         if players is None:
-            print(f"Cache not available, calculating live (this will be slow)...")
-            players = weekly_analyzer.get_top_bestball_players(
-                stats_type=stats_type,
-                min_games=min_games,
-                limit=limit
-            )
+            if scoring_system != 'draftkings':
+                print(f"Using {scoring_system} scoring (live calculation)...")
+            else:
+                print(f"Cache not available, calculating live...")
+
+            # Create analyzer with selected scoring system
+            weekly_analyzer = WeeklyAnalyzer(db, scoring_system=scoring_system)
+
+            # Use combined method for combined rankings
+            if stats_type == 'combined':
+                players = weekly_analyzer.get_top_bestball_players_combined(
+                    min_games=min_games,
+                    limit=limit
+                )
+            else:
+                players = weekly_analyzer.get_top_bestball_players(
+                    stats_type=stats_type,
+                    min_games=min_games,
+                    limit=limit
+                )
 
         # Sort by requested field
         players.sort(key=lambda x: x.get(sort_by, 0), reverse=True)
@@ -116,7 +144,8 @@ def get_players():
             'success': True,
             'players': players_with_percentiles,
             'count': len(players_with_percentiles),
-            'from_cache': use_cache and _player_cache[stats_type] is not None
+            'scoring_system': scoring_system,
+            'from_cache': use_cache and scoring_system == 'draftkings' and _player_cache.get(stats_type) is not None
         })
 
     except Exception as e:
@@ -131,6 +160,10 @@ def get_player_detail(player_id):
     """Get detailed stats for a specific player."""
     try:
         stats_type = request.args.get('stats_type', 'batting')
+        scoring_system = request.args.get('scoring_system', 'draftkings')
+
+        # Create analyzer with selected scoring system
+        weekly_analyzer = WeeklyAnalyzer(db, scoring_system=scoring_system)
 
         # Get player metrics
         metrics = weekly_analyzer.calculate_weekly_volatility(player_id, stats_type)
@@ -206,6 +239,103 @@ def calculate_percentiles(players):
             player[f'{stat}_percentile'] = round(percentile, 1)
 
     return players
+
+
+@app.route('/api/scoring-systems', methods=['GET'])
+def get_scoring_systems():
+    """Get list of available scoring systems."""
+    try:
+        from src.utils.multi_scoring import MultiScoringCalculator
+        calc = MultiScoringCalculator()
+        systems = calc.get_available_systems()
+
+        return jsonify({
+            'success': True,
+            'scoring_systems': systems
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/export', methods=['GET'])
+def export_rankings():
+    """
+    Export player rankings to CSV format.
+
+    Query params:
+        stats_type: 'batting', 'pitching', or 'combined' (default: batting)
+        min_games: Minimum games played (default: 20)
+        limit: Max players to return (default: 100)
+        format: 'csv' or 'json' (default: csv)
+        include_workhorse: Include workhorse metrics (default: true for pitchers)
+    """
+    try:
+        stats_type = request.args.get('stats_type', 'batting')
+        scoring_system = request.args.get('scoring_system', 'draftkings')
+        min_games = int(request.args.get('min_games', 20))
+        limit = int(request.args.get('limit', 100))
+        export_format = request.args.get('format', 'csv').lower()
+        include_workhorse = request.args.get('include_workhorse', 'true').lower() == 'true'
+
+        # Get players from cache or live calculation (cache only for DraftKings)
+        players = None
+        if scoring_system == 'draftkings':
+            players = load_cached_players(stats_type)
+
+        if players is None:
+            print(f"Calculating live for export with {scoring_system} scoring...")
+
+            # Create analyzer with selected scoring system
+            weekly_analyzer = WeeklyAnalyzer(db, scoring_system=scoring_system)
+
+            if stats_type == 'combined':
+                players = weekly_analyzer.get_top_bestball_players_combined(
+                    min_games=min_games,
+                    limit=limit
+                )
+            else:
+                players = weekly_analyzer.get_top_bestball_players(
+                    stats_type=stats_type,
+                    min_games=min_games,
+                    limit=limit
+                )
+
+        # Apply limit
+        players = players[:limit]
+
+        # Create temporary file for export
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+        if export_format == 'json':
+            # Export as JSON
+            temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+            RankingsExporter.to_json(players, temp_file.name)
+            filename = f'mlb_bestball_{scoring_system}_{stats_type}_{timestamp}.json'
+            mimetype = 'application/json'
+        else:
+            # Export as CSV (default)
+            temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+            RankingsExporter.to_csv(players, temp_file.name, include_workhorse=include_workhorse)
+            filename = f'mlb_bestball_{scoring_system}_{stats_type}_{timestamp}.csv'
+            mimetype = 'text/csv'
+
+        temp_file.close()
+
+        return send_file(
+            temp_file.name,
+            mimetype=mimetype,
+            as_attachment=True,
+            download_name=filename
+        )
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
 if __name__ == '__main__':

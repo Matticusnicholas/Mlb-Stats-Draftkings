@@ -17,10 +17,20 @@
         <!-- Filters -->
         <div class="filters-section">
             <div class="filter-group">
+                <label for="scoring-system">Scoring:</label>
+                <select id="scoring-system" class="filter-select">
+                    <option value="draftkings" selected>DraftKings</option>
+                    <option value="underdog">Underdog Fantasy</option>
+                    <option value="drafters">Drafters</option>
+                </select>
+            </div>
+
+            <div class="filter-group">
                 <label for="stats-type">Position:</label>
                 <select id="stats-type" class="filter-select">
                     <option value="batting">Batting</option>
                     <option value="pitching">Pitching</option>
+                    <option value="combined">Combined Rankings</option>
                 </select>
             </div>
 
@@ -40,6 +50,7 @@
             </div>
 
             <button id="load-btn" class="btn-primary">Load Players</button>
+            <button id="export-btn" class="btn-secondary">Export CSV</button>
             <button id="refresh-btn" class="btn-secondary">Refresh Data</button>
         </div>
 
@@ -59,7 +70,9 @@
                 <li><strong>Pts/Wk:</strong> Average points per useful week (concentration metric - higher = more explosive)</li>
                 <li><strong>Best Week:</strong> Highest 7-day rolling window points total</li>
                 <li><strong>Boom%:</strong> Percentage of weeks scoring 90th percentile or higher</li>
-                <li><strong>TEAR3/TEAR4:</strong> Multi-game hot streak rates (3+ or 4+ consecutive elite games)</li>
+                <li><strong>TEAR3/TEAR4:</strong> Multi-game hot streaks (3+ or 4+ consecutive elite games)</li>
+                <li id="workhorse-info" style="display:none;"><strong>Workhorse Score:</strong> Innings-eating reliability (0-100): durability, IP/start, quality starts</li>
+                <li id="workhorse-qs" style="display:none;"><strong>QS Rate:</strong> Percentage of starts with 6+ IP (quality starts)</li>
             </ul>
         </div>
 
@@ -67,7 +80,7 @@
         <div class="table-container">
             <table id="players-table" class="players-table">
                 <thead>
-                    <tr>
+                    <tr id="table-headers">
                         <th class="sortable" data-sort="player_name">Player Name</th>
                         <th class="sortable" data-sort="bestball_score">BB Score</th>
                         <th class="sortable" data-sort="useful_points_total">Useful Pts</th>
@@ -89,7 +102,7 @@
 
         <!-- Footer -->
         <footer class="footer">
-            <p>MLB Best Ball Analyzer • Data from MLB Stats API • DraftKings scoring</p>
+            <p id="scoring-info">MLB Best Ball Analyzer • Data from MLB Stats API • DraftKings scoring</p>
             <p id="db-stats"></p>
         </footer>
     </div>

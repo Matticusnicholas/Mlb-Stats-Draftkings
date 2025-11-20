@@ -1,4 +1,6 @@
 {
+  "platform": "DraftKings",
+  "format": "Best Ball / DFS",
   "batting": {
     "1B": 3,
     "2B": 5,

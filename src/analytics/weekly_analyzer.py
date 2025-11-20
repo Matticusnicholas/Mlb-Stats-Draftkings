@@ -11,6 +11,7 @@ import logging
 
 from ..database.models import PlayerGame, Game
 from ..database.db_manager import DatabaseManager
+from ..utils.multi_scoring import MultiScoringCalculator
 
 logger = logging.getLogger(__name__)
 
@@ -20,14 +21,35 @@ class WeeklyAnalyzer:
     Analyzes weekly performance and hot streaks for Best Ball optimization.
     """
 
-    def __init__(self, db_manager: DatabaseManager):
+    def __init__(self, db_manager: DatabaseManager, scoring_system: str = 'draftkings'):
         """
         Initialize weekly analyzer.
 
         Args:
             db_manager: Database manager instance
+            scoring_system: Scoring system to use ('draftkings', 'underdog', 'drafters')
         """
         self.db = db_manager
+        self.scoring_system = scoring_system
+        self.multi_scoring = MultiScoringCalculator()
+        logger.info(f"WeeklyAnalyzer initialized with scoring system: {scoring_system}")
+
+    def _get_points(self, player_game) -> float:
+        """
+        Get points for a player game using current scoring system.
+
+        Args:
+            player_game: PlayerGame object
+
+        Returns:
+            Fantasy points for this game
+        """
+        if self.scoring_system == 'draftkings':
+            # Use pre-calculated DK points from database (faster)
+            return player_game.dk_points
+        else:
+            # Recalculate from raw stats using selected scoring system
+            return self.multi_scoring.recalculate_points(player_game, self.scoring_system)
 
     def get_player_sequential_weeks(
         self,
@@ -62,9 +84,11 @@ class WeeklyAnalyzer:
             for pg in player_games:
                 game = session.query(Game).filter(Game.game_pk == pg.game_pk).first()
                 if game:
+                    # Use dynamic scoring
+                    points = self._get_points(pg)
                     data.append({
                         'date': game.game_date.date(),
-                        'points': pg.dk_points,
+                        'points': points,
                         'game_pk': pg.game_pk
                     })
 
@@ -141,9 +165,11 @@ class WeeklyAnalyzer:
             for pg in player_games:
                 game = session.query(Game).filter_by(game_pk=pg.game_pk).first()
                 if game:
+                    # Use dynamic scoring
+                    points = self._get_points(pg)
                     data.append({
                         'date': game.game_date.date(),
-                        'points': pg.dk_points,
+                        'points': points,
                         'game_pk': pg.game_pk
                     })
 
@@ -224,9 +250,11 @@ class WeeklyAnalyzer:
             for pg in player_games:
                 game = session.query(Game).filter_by(game_pk=pg.game_pk).first()
                 if game:
+                    # Use dynamic scoring
+                    points = self._get_points(pg)
                     games_with_dates.append({
                         'date': game.game_date,
-                        'points': pg.dk_points
+                        'points': points
                     })
 
             games_with_dates.sort(key=lambda x: x['date'])
@@ -385,10 +413,15 @@ class WeeklyAnalyzer:
         tear_metrics = self.calculate_tear_metrics(player_id, stats_type)
         metrics.update(tear_metrics)
 
-        # Pitcher Start Levels (for pitchers only)
+        # Pitcher-specific metrics (for pitchers only)
         if stats_type == "pitching":
+            # Start Levels (elite start clustering)
             start_levels = self.calculate_start_levels(player_id, stats_type)
             metrics.update(start_levels)
+
+            # Workhorse Metrics (innings-eating reliability)
+            workhorse_metrics = self.calculate_workhorse_metrics(player_id, stats_type)
+            metrics.update(workhorse_metrics)
 
         # Weekly consistency score (inverse - lower = more volatile = better for best ball)
         cv = metrics['std_week_points'] / metrics['mean_week_points'] if metrics['mean_week_points'] > 0 else 0
@@ -398,6 +431,113 @@ class WeeklyAnalyzer:
         metrics['bestball_score'] = self._calculate_bestball_score(metrics)
 
         return metrics
+
+    def calculate_workhorse_metrics(
+        self,
+        player_id: int,
+        stats_type: str = "pitching",
+        min_ip_for_start: float = 3.0
+    ) -> Dict:
+        """
+        Calculate workhorse metrics for starting pitchers.
+
+        Focuses on innings-eating reliability and durability - critical for
+        best ball formats where you want consistent weekly innings from your
+        pitcher slots (floor play vs. hitter ceiling plays).
+
+        Args:
+            player_id: MLB player ID
+            stats_type: Should be 'pitching'
+            min_ip_for_start: Minimum IP to count as a start (default 3.0)
+
+        Returns:
+            Dictionary with workhorse metrics:
+            - total_starts: Games with min_ip_for_start+ innings
+            - avg_ip_per_start: Average innings per start
+            - total_innings: Total innings pitched in starts
+            - ip_consistency: StdDev of IP (lower = more consistent)
+            - quality_start_rate: % of starts with 6+ IP
+            - deep_start_rate: % of starts with 7+ IP
+            - floor_points: 25th percentile DK points per start
+            - median_points: Median DK points per start
+            - workhorse_score: Composite 0-100 score for innings-eating ability
+        """
+        player_games = self.db.get_player_games(player_id, stats_type)
+
+        # Filter to actual starts (3+ IP)
+        starts = [pg for pg in player_games if pg.innings_pitched and pg.innings_pitched >= min_ip_for_start]
+
+        if len(starts) < 5:
+            return {
+                'total_starts': len(starts),
+                'avg_ip_per_start': 0.0,
+                'total_innings': 0.0,
+                'ip_consistency': 0.0,
+                'quality_start_rate': 0.0,
+                'deep_start_rate': 0.0,
+                'floor_points': 0.0,
+                'median_points': 0.0,
+                'workhorse_score': 0.0
+            }
+
+        # Gather stats from starts using current scoring system
+        innings = np.array([pg.innings_pitched for pg in starts])
+        points = np.array([self._get_points(pg) for pg in starts])
+
+        total_starts = len(starts)
+        total_innings = float(np.sum(innings))
+        avg_ip = float(np.mean(innings))
+        ip_std = float(np.std(innings))
+
+        # Quality starts (6+ IP)
+        quality_starts = np.sum(innings >= 6.0)
+        quality_start_rate = float(quality_starts / total_starts * 100) if total_starts > 0 else 0.0
+
+        # Deep starts (7+ IP)
+        deep_starts = np.sum(innings >= 7.0)
+        deep_start_rate = float(deep_starts / total_starts * 100) if total_starts > 0 else 0.0
+
+        # Floor and median DK points
+        floor_points = float(np.percentile(points, 25))
+        median_points = float(np.median(points))
+
+        # Calculate workhorse score (0-100)
+        # Components:
+        # 1. Durability (30%): Total starts / 30 (assuming ~30 starts is elite)
+        # 2. Innings per start (30%): (avg_ip - 4) / 3 (scale 4-7 IP to 0-1)
+        # 3. Quality start rate (20%)
+        # 4. Consistency (10%): Inverse of coefficient of variation
+        # 5. Floor reliability (10%): floor_points / 20 (20+ pts is solid)
+
+        durability_score = min(100, (total_starts / 30.0) * 100)
+        ip_score = min(100, max(0, ((avg_ip - 4.0) / 3.0) * 100))
+        qs_score = quality_start_rate  # Already 0-100
+
+        # Consistency: Lower CV is better (CV = std/mean)
+        cv = (ip_std / avg_ip) if avg_ip > 0 else 1.0
+        consistency_score = max(0, 100 - (cv * 100))  # Invert so lower CV = higher score
+
+        floor_score = min(100, (floor_points / 20.0) * 100)
+
+        workhorse_score = (
+            durability_score * 0.30 +
+            ip_score * 0.30 +
+            qs_score * 0.20 +
+            consistency_score * 0.10 +
+            floor_score * 0.10
+        )
+
+        return {
+            'total_starts': int(total_starts),
+            'avg_ip_per_start': float(avg_ip),
+            'total_innings': float(total_innings),
+            'ip_consistency': float(ip_std),
+            'quality_start_rate': float(quality_start_rate),
+            'deep_start_rate': float(deep_start_rate),
+            'floor_points': float(floor_points),
+            'median_points': float(median_points),
+            'workhorse_score': float(workhorse_score)
+        }
 
     def calculate_start_levels(
         self,
@@ -433,8 +573,8 @@ class WeeklyAnalyzer:
                 'level3_avg_pts': 0.0
             }
 
-        # Get all DK points from games
-        points = np.array([pg.dk_points for pg in player_games])
+        # Get all points from games using current scoring system
+        points = np.array([self._get_points(pg) for pg in player_games])
 
         # Calculate percentile thresholds
         p70 = np.percentile(points, 70)  # Level 1: Top 30%
@@ -754,9 +894,10 @@ class WeeklyAnalyzer:
                                 'wasted_points': metrics.get('wasted_points', 0)
                             }
 
-                            # Add pitcher start levels for pitchers
+                            # Add pitcher-specific metrics for pitchers
                             if stats_type == "pitching":
                                 player_dict.update({
+                                    # Start Levels
                                     'level1_starts': metrics.get('level1_starts', 0),
                                     'level2_starts': metrics.get('level2_starts', 0),
                                     'level3_starts': metrics.get('level3_starts', 0),
@@ -765,7 +906,17 @@ class WeeklyAnalyzer:
                                     'level3_rate': metrics.get('level3_rate', 0.0),
                                     'level1_avg_pts': metrics.get('level1_avg_pts', 0.0),
                                     'level2_avg_pts': metrics.get('level2_avg_pts', 0.0),
-                                    'level3_avg_pts': metrics.get('level3_avg_pts', 0.0)
+                                    'level3_avg_pts': metrics.get('level3_avg_pts', 0.0),
+                                    # Workhorse Metrics
+                                    'total_starts': metrics.get('total_starts', 0),
+                                    'avg_ip_per_start': metrics.get('avg_ip_per_start', 0.0),
+                                    'total_innings': metrics.get('total_innings', 0.0),
+                                    'ip_consistency': metrics.get('ip_consistency', 0.0),
+                                    'quality_start_rate': metrics.get('quality_start_rate', 0.0),
+                                    'deep_start_rate': metrics.get('deep_start_rate', 0.0),
+                                    'floor_points': metrics.get('floor_points', 0.0),
+                                    'median_points': metrics.get('median_points', 0.0),
+                                    'workhorse_score': metrics.get('workhorse_score', 0.0)
                                 })
 
                             player_scores.append(player_dict)
@@ -781,6 +932,68 @@ class WeeklyAnalyzer:
 
         finally:
             session.close()
+
+    def get_top_bestball_players_combined(
+        self,
+        min_games: int = 20,
+        limit: int = 100,
+        progress_callback=None
+    ) -> List[Dict]:
+        """
+        Get top players for best ball combining both batting and pitching.
+
+        This creates a unified ranking where hitters and pitchers compete on the
+        same bestball_score metric (0-100). Since hitters play more frequently,
+        they naturally accumulate more USEFUL points and will dominate the rankings.
+
+        Args:
+            min_games: Minimum games required
+            limit: Number of players to return
+            progress_callback: Optional callback function(current, total, player_name, player_type)
+
+        Returns:
+            List of player dictionaries with weekly metrics and player_type field
+        """
+        logger.info("Calculating combined Best Ball rankings (batting + pitching)...")
+
+        # Get batting players
+        logger.info("Fetching batting players...")
+        batting_players = self.get_top_bestball_players(
+            stats_type="batting",
+            min_games=min_games,
+            limit=500,  # Get more than needed so we have a good pool
+            progress_callback=lambda curr, total, name: progress_callback(
+                curr, total * 2, name, "batting"
+            ) if progress_callback else None
+        )
+
+        # Add player_type field to batting players
+        for player in batting_players:
+            player['player_type'] = 'batting'
+
+        # Get pitching players
+        logger.info("Fetching pitching players...")
+        pitching_players = self.get_top_bestball_players(
+            stats_type="pitching",
+            min_games=min_games,
+            limit=500,  # Get more than needed so we have a good pool
+            progress_callback=lambda curr, total, name: progress_callback(
+                curr + total, total * 2, name, "pitching"
+            ) if progress_callback else None
+        )
+
+        # Add player_type field to pitching players
+        for player in pitching_players:
+            player['player_type'] = 'pitching'
+
+        # Combine and sort by bestball_score
+        combined_players = batting_players + pitching_players
+        combined_players.sort(key=lambda x: x['bestball_score'], reverse=True)
+
+        logger.info(f"Combined rankings: {len(batting_players)} hitters + {len(pitching_players)} pitchers = {len(combined_players)} total")
+
+        # Return top N
+        return combined_players[:limit]
 
 
 if __name__ == "__main__":
