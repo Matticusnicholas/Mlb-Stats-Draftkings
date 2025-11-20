@@ -20,10 +20,9 @@ from src.utils.export_rankings import RankingsExporter
 app = Flask(__name__)
 CORS(app)
 
-# Initialize database and analyzer
+# Initialize database
 DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'mlb_stats.db')
 db = DatabaseManager(DB_PATH)
-weekly_analyzer = WeeklyAnalyzer(db)
 
 # Cache file paths
 CACHE_DIR = os.path.join(os.path.dirname(__file__), 'cache')
@@ -90,26 +89,34 @@ def get_players():
 
     Query params:
         stats_type: 'batting', 'pitching', or 'combined' (default: batting)
+        scoring_system: 'draftkings', 'underdog', or 'drafters' (default: draftkings)
         min_games: Minimum games played (default: 20)
         limit: Max players to return (default: 100)
         sort_by: Field to sort by (default: bestball_score)
-        use_cache: Use cached data if available (default: true)
+        use_cache: Use cached data if available (default: true, only for DraftKings)
     """
     try:
         stats_type = request.args.get('stats_type', 'batting')
+        scoring_system = request.args.get('scoring_system', 'draftkings')
         min_games = int(request.args.get('min_games', 20))
         limit = int(request.args.get('limit', 100))
         sort_by = request.args.get('sort_by', 'bestball_score')
         use_cache = request.args.get('use_cache', 'true').lower() == 'true'
 
-        # Try to load from cache first (MUCH faster)
+        # Cache only available for DraftKings scoring
         players = None
-        if use_cache:
+        if use_cache and scoring_system == 'draftkings':
             players = load_cached_players(stats_type)
 
-        # Fall back to live calculation if cache not available
+        # Fall back to live calculation if cache not available or different scoring system
         if players is None:
-            print(f"Cache not available, calculating live (this will be slow)...")
+            if scoring_system != 'draftkings':
+                print(f"Using {scoring_system} scoring (live calculation)...")
+            else:
+                print(f"Cache not available, calculating live...")
+
+            # Create analyzer with selected scoring system
+            weekly_analyzer = WeeklyAnalyzer(db, scoring_system=scoring_system)
 
             # Use combined method for combined rankings
             if stats_type == 'combined':
@@ -137,7 +144,8 @@ def get_players():
             'success': True,
             'players': players_with_percentiles,
             'count': len(players_with_percentiles),
-            'from_cache': use_cache and _player_cache.get(stats_type) is not None
+            'scoring_system': scoring_system,
+            'from_cache': use_cache and scoring_system == 'draftkings' and _player_cache.get(stats_type) is not None
         })
 
     except Exception as e:
@@ -152,6 +160,10 @@ def get_player_detail(player_id):
     """Get detailed stats for a specific player."""
     try:
         stats_type = request.args.get('stats_type', 'batting')
+        scoring_system = request.args.get('scoring_system', 'draftkings')
+
+        # Create analyzer with selected scoring system
+        weekly_analyzer = WeeklyAnalyzer(db, scoring_system=scoring_system)
 
         # Get player metrics
         metrics = weekly_analyzer.calculate_weekly_volatility(player_id, stats_type)
@@ -229,6 +241,25 @@ def calculate_percentiles(players):
     return players
 
 
+@app.route('/api/scoring-systems', methods=['GET'])
+def get_scoring_systems():
+    """Get list of available scoring systems."""
+    try:
+        from src.utils.multi_scoring import MultiScoringCalculator
+        calc = MultiScoringCalculator()
+        systems = calc.get_available_systems()
+
+        return jsonify({
+            'success': True,
+            'scoring_systems': systems
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 @app.route('/api/export', methods=['GET'])
 def export_rankings():
     """
@@ -243,15 +274,23 @@ def export_rankings():
     """
     try:
         stats_type = request.args.get('stats_type', 'batting')
+        scoring_system = request.args.get('scoring_system', 'draftkings')
         min_games = int(request.args.get('min_games', 20))
         limit = int(request.args.get('limit', 100))
         export_format = request.args.get('format', 'csv').lower()
         include_workhorse = request.args.get('include_workhorse', 'true').lower() == 'true'
 
-        # Get players from cache or live calculation
-        players = load_cached_players(stats_type)
+        # Get players from cache or live calculation (cache only for DraftKings)
+        players = None
+        if scoring_system == 'draftkings':
+            players = load_cached_players(stats_type)
+
         if players is None:
-            print(f"Cache not available, calculating live for export...")
+            print(f"Calculating live for export with {scoring_system} scoring...")
+
+            # Create analyzer with selected scoring system
+            weekly_analyzer = WeeklyAnalyzer(db, scoring_system=scoring_system)
+
             if stats_type == 'combined':
                 players = weekly_analyzer.get_top_bestball_players_combined(
                     min_games=min_games,
@@ -274,13 +313,13 @@ def export_rankings():
             # Export as JSON
             temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
             RankingsExporter.to_json(players, temp_file.name)
-            filename = f'mlb_bestball_{stats_type}_{timestamp}.json'
+            filename = f'mlb_bestball_{scoring_system}_{stats_type}_{timestamp}.json'
             mimetype = 'application/json'
         else:
             # Export as CSV (default)
             temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
             RankingsExporter.to_csv(players, temp_file.name, include_workhorse=include_workhorse)
-            filename = f'mlb_bestball_{stats_type}_{timestamp}.csv'
+            filename = f'mlb_bestball_{scoring_system}_{stats_type}_{timestamp}.csv'
             mimetype = 'text/csv'
 
         temp_file.close()

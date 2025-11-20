@@ -229,13 +229,22 @@ def main():
         choices=["csv", "json"],
         help="Export format (default: csv)"
     )
+    parser.add_argument(
+        "--scoring-system",
+        type=str,
+        default="draftkings",
+        choices=["draftkings", "underdog", "drafters"],
+        help="Scoring system to use (default: draftkings)"
+    )
 
     args = parser.parse_args()
 
     # Initialize components
     logger.info("Initializing Best Ball analyzer...")
     db = DatabaseManager(db_path=args.db_path)
-    analyzer = WeeklyAnalyzer(db)
+    scoring_system = getattr(args, 'scoring_system', 'draftkings')
+    analyzer = WeeklyAnalyzer(db, scoring_system=scoring_system)
+    logger.info(f"Using {scoring_system} scoring system")
 
     if args.player_id:
         # Show detailed analysis for specific player

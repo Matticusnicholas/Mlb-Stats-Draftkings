@@ -11,6 +11,7 @@ import logging
 
 from ..database.models import PlayerGame, Game
 from ..database.db_manager import DatabaseManager
+from ..utils.multi_scoring import MultiScoringCalculator
 
 logger = logging.getLogger(__name__)
 
@@ -20,14 +21,35 @@ class WeeklyAnalyzer:
     Analyzes weekly performance and hot streaks for Best Ball optimization.
     """
 
-    def __init__(self, db_manager: DatabaseManager):
+    def __init__(self, db_manager: DatabaseManager, scoring_system: str = 'draftkings'):
         """
         Initialize weekly analyzer.
 
         Args:
             db_manager: Database manager instance
+            scoring_system: Scoring system to use ('draftkings', 'underdog', 'drafters')
         """
         self.db = db_manager
+        self.scoring_system = scoring_system
+        self.multi_scoring = MultiScoringCalculator()
+        logger.info(f"WeeklyAnalyzer initialized with scoring system: {scoring_system}")
+
+    def _get_points(self, player_game) -> float:
+        """
+        Get points for a player game using current scoring system.
+
+        Args:
+            player_game: PlayerGame object
+
+        Returns:
+            Fantasy points for this game
+        """
+        if self.scoring_system == 'draftkings':
+            # Use pre-calculated DK points from database (faster)
+            return player_game.dk_points
+        else:
+            # Recalculate from raw stats using selected scoring system
+            return self.multi_scoring.recalculate_points(player_game, self.scoring_system)
 
     def get_player_sequential_weeks(
         self,
@@ -62,9 +84,11 @@ class WeeklyAnalyzer:
             for pg in player_games:
                 game = session.query(Game).filter(Game.game_pk == pg.game_pk).first()
                 if game:
+                    # Use dynamic scoring
+                    points = self._get_points(pg)
                     data.append({
                         'date': game.game_date.date(),
-                        'points': pg.dk_points,
+                        'points': points,
                         'game_pk': pg.game_pk
                     })
 
@@ -141,9 +165,11 @@ class WeeklyAnalyzer:
             for pg in player_games:
                 game = session.query(Game).filter_by(game_pk=pg.game_pk).first()
                 if game:
+                    # Use dynamic scoring
+                    points = self._get_points(pg)
                     data.append({
                         'date': game.game_date.date(),
-                        'points': pg.dk_points,
+                        'points': points,
                         'game_pk': pg.game_pk
                     })
 
@@ -224,9 +250,11 @@ class WeeklyAnalyzer:
             for pg in player_games:
                 game = session.query(Game).filter_by(game_pk=pg.game_pk).first()
                 if game:
+                    # Use dynamic scoring
+                    points = self._get_points(pg)
                     games_with_dates.append({
                         'date': game.game_date,
-                        'points': pg.dk_points
+                        'points': points
                     })
 
             games_with_dates.sort(key=lambda x: x['date'])
@@ -452,9 +480,9 @@ class WeeklyAnalyzer:
                 'workhorse_score': 0.0
             }
 
-        # Gather stats from starts
+        # Gather stats from starts using current scoring system
         innings = np.array([pg.innings_pitched for pg in starts])
-        points = np.array([pg.dk_points for pg in starts])
+        points = np.array([self._get_points(pg) for pg in starts])
 
         total_starts = len(starts)
         total_innings = float(np.sum(innings))
@@ -545,8 +573,8 @@ class WeeklyAnalyzer:
                 'level3_avg_pts': 0.0
             }
 
-        # Get all DK points from games
-        points = np.array([pg.dk_points for pg in player_games])
+        # Get all points from games using current scoring system
+        points = np.array([self._get_points(pg) for pg in player_games])
 
         # Calculate percentile thresholds
         p70 = np.percentile(points, 70)  # Level 1: Top 30%
