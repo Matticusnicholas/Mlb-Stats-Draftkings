@@ -10,6 +10,7 @@ import logging
 
 from src.database.db_manager import DatabaseManager
 from src.analytics.weekly_analyzer import WeeklyAnalyzer
+from src.utils.export_rankings import RankingsExporter
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,7 +23,9 @@ def analyze_top_bestball_players(
     analyzer: WeeklyAnalyzer,
     stats_type: str = "batting",
     min_games: int = 20,
-    top_n: int = 50
+    top_n: int = 50,
+    export_path: str = None,
+    export_format: str = "csv"
 ):
     """
     Analyze and display top players for best ball.
@@ -32,6 +35,8 @@ def analyze_top_bestball_players(
         stats_type: 'batting', 'pitching', or 'combined'
         min_games: Minimum games required
         top_n: Number of top players to show
+        export_path: Optional path to export rankings (CSV or JSON)
+        export_format: Export format - 'csv' or 'json' (default: csv)
     """
     logger.info(f"Analyzing top {top_n} best ball {stats_type} players...")
 
@@ -51,6 +56,20 @@ def analyze_top_bestball_players(
     if not top_players:
         logger.warning("No players found with sufficient data")
         return
+
+    # Export if requested
+    if export_path:
+        logger.info(f"Exporting rankings to {export_path}...")
+        try:
+            if export_format.lower() == 'json':
+                RankingsExporter.to_json(top_players, export_path)
+            else:
+                include_workhorse = (stats_type == "pitching")
+                RankingsExporter.to_csv(top_players, export_path, include_workhorse=include_workhorse)
+            logger.info(f"✓ Successfully exported {len(top_players)} players to {export_path}")
+        except Exception as e:
+            logger.error(f"Export failed: {e}")
+            return
 
     # Determine column widths based on whether we're showing player type
     show_type = stats_type == "combined"
@@ -198,6 +217,18 @@ def main():
         type=int,
         help="Show detailed analysis for specific player ID"
     )
+    parser.add_argument(
+        "--export",
+        type=str,
+        help="Export rankings to file (e.g., rankings.csv or rankings.json)"
+    )
+    parser.add_argument(
+        "--export-format",
+        type=str,
+        default="csv",
+        choices=["csv", "json"],
+        help="Export format (default: csv)"
+    )
 
     args = parser.parse_args()
 
@@ -219,7 +250,9 @@ def main():
             analyzer=analyzer,
             stats_type=args.stats_type,
             min_games=args.min_games,
-            top_n=args.top_n
+            top_n=args.top_n,
+            export_path=args.export,
+            export_format=args.export_format
         )
 
     logger.info("\nBest Ball analysis complete!")

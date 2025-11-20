@@ -2,18 +2,20 @@
 Flask web application for MLB Best Ball Analyzer.
 Baseball Savant-style interface for Best Ball draft analysis.
 """
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, send_file
 from flask_cors import CORS
 import sys
 import os
 import json
 from datetime import datetime
+import tempfile
 
 # Add parent directory to path to import from src
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from src.database.db_manager import DatabaseManager
 from src.analytics.weekly_analyzer import WeeklyAnalyzer
+from src.utils.export_rankings import RankingsExporter
 
 app = Flask(__name__)
 CORS(app)
@@ -225,6 +227,76 @@ def calculate_percentiles(players):
             player[f'{stat}_percentile'] = round(percentile, 1)
 
     return players
+
+
+@app.route('/api/export', methods=['GET'])
+def export_rankings():
+    """
+    Export player rankings to CSV format.
+
+    Query params:
+        stats_type: 'batting', 'pitching', or 'combined' (default: batting)
+        min_games: Minimum games played (default: 20)
+        limit: Max players to return (default: 100)
+        format: 'csv' or 'json' (default: csv)
+        include_workhorse: Include workhorse metrics (default: true for pitchers)
+    """
+    try:
+        stats_type = request.args.get('stats_type', 'batting')
+        min_games = int(request.args.get('min_games', 20))
+        limit = int(request.args.get('limit', 100))
+        export_format = request.args.get('format', 'csv').lower()
+        include_workhorse = request.args.get('include_workhorse', 'true').lower() == 'true'
+
+        # Get players from cache or live calculation
+        players = load_cached_players(stats_type)
+        if players is None:
+            print(f"Cache not available, calculating live for export...")
+            if stats_type == 'combined':
+                players = weekly_analyzer.get_top_bestball_players_combined(
+                    min_games=min_games,
+                    limit=limit
+                )
+            else:
+                players = weekly_analyzer.get_top_bestball_players(
+                    stats_type=stats_type,
+                    min_games=min_games,
+                    limit=limit
+                )
+
+        # Apply limit
+        players = players[:limit]
+
+        # Create temporary file for export
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+        if export_format == 'json':
+            # Export as JSON
+            temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+            RankingsExporter.to_json(players, temp_file.name)
+            filename = f'mlb_bestball_{stats_type}_{timestamp}.json'
+            mimetype = 'application/json'
+        else:
+            # Export as CSV (default)
+            temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False)
+            RankingsExporter.to_csv(players, temp_file.name, include_workhorse=include_workhorse)
+            filename = f'mlb_bestball_{stats_type}_{timestamp}.csv'
+            mimetype = 'text/csv'
+
+        temp_file.close()
+
+        return send_file(
+            temp_file.name,
+            mimetype=mimetype,
+            as_attachment=True,
+            download_name=filename
+        )
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
 if __name__ == '__main__':
