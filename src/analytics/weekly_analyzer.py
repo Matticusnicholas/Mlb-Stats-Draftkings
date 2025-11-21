@@ -37,6 +37,7 @@ class WeeklyAnalyzer:
     def _get_points(self, player_game) -> float:
         """
         Get points for a player game using current scoring system.
+        Uses cached points from database for instant switching between platforms.
 
         Args:
             player_game: PlayerGame object
@@ -44,11 +45,23 @@ class WeeklyAnalyzer:
         Returns:
             Fantasy points for this game
         """
+        # Use cached points from database (pre-calculated for all scoring systems)
         if self.scoring_system == 'draftkings':
-            # Use pre-calculated DK points from database (faster)
             return player_game.dk_points
+        elif self.scoring_system == 'underdog':
+            # Use cached underdog points if available, otherwise recalculate
+            if player_game.underdog_points is not None:
+                return player_game.underdog_points
+            else:
+                return self.multi_scoring.recalculate_points(player_game, self.scoring_system)
+        elif self.scoring_system == 'drafters':
+            # Use cached drafters points if available, otherwise recalculate
+            if player_game.drafters_points is not None:
+                return player_game.drafters_points
+            else:
+                return self.multi_scoring.recalculate_points(player_game, self.scoring_system)
         else:
-            # Recalculate from raw stats using selected scoring system
+            # Fallback for any other scoring system
             return self.multi_scoring.recalculate_points(player_game, self.scoring_system)
 
     def get_player_sequential_weeks(

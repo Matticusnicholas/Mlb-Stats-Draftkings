@@ -69,8 +69,10 @@ class PlayerGame(Base):
     position = Column(String(10))
     stats_type = Column(String(20), nullable=False)  # batting or pitching
 
-    # DraftKings points
+    # Multi-platform points (cached for performance)
     dk_points = Column(Float, nullable=False)
+    underdog_points = Column(Float)
+    drafters_points = Column(Float)
 
     # Batting stats
     at_bats = Column(Integer)
@@ -177,6 +179,20 @@ class PlayerVolatility(Base):
 
     def __repr__(self):
         return f"<PlayerVolatility(player={self.player_id}, var_score={self.variance_score})>"
+
+
+class CacheMetadata(Base):
+    """Track when cached data was last calculated."""
+
+    __tablename__ = "cache_metadata"
+
+    cache_key = Column(String(100), primary_key=True)  # e.g., 'underdog_points', 'drafters_points'
+    last_calculated = Column(DateTime, nullable=False)
+    total_records = Column(Integer)
+    calculation_duration = Column(Float)  # seconds
+
+    def __repr__(self):
+        return f"<CacheMetadata(key={self.cache_key}, last_calculated={self.last_calculated})>"
 
 
 def create_database(db_path: str = "data/mlb_stats.db"):
