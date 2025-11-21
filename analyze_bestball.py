@@ -182,6 +182,54 @@ def show_player_detail(
         session.close()
 
 
+def show_cache_status(db):
+    """Show cache status for all scoring systems."""
+    from datetime import datetime
+    from sqlalchemy import text
+
+    session = db.get_session()
+    try:
+        scoring_systems = ['draftkings', 'underdog', 'drafters']
+
+        print("\n" + "="*70)
+        print("  SCORING CACHE STATUS")
+        print("="*70)
+
+        for system in scoring_systems:
+            cache_key = f"{system}_points"
+
+            # Check if metadata exists
+            result = session.execute(
+                text("SELECT last_calculated, total_records FROM cache_metadata WHERE cache_key = :key"),
+                {"key": cache_key}
+            ).fetchone()
+
+            if result:
+                last_calc, total = result
+                last_calc_dt = datetime.fromisoformat(last_calc) if isinstance(last_calc, str) else last_calc
+                time_ago = datetime.utcnow() - last_calc_dt
+
+                days = time_ago.days
+                hours = time_ago.seconds // 3600
+
+                if days > 0:
+                    time_str = f"{days}d {hours}h ago"
+                elif hours > 0:
+                    time_str = f"{hours}h ago"
+                else:
+                    time_str = "< 1h ago"
+
+                print(f"  {system.upper():12} ✅ Cached ({time_str}) - {total:,} records")
+            else:
+                print(f"  {system.upper():12} ⚠️  Not cached (will calculate live)")
+
+        print("="*70)
+        print("TIP: Run 'python update_scoring_cache.py' to pre-calculate all scoring systems")
+        print()
+    finally:
+        session.close()
+
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -236,12 +284,26 @@ def main():
         choices=["draftkings", "underdog", "drafters"],
         help="Scoring system to use (default: draftkings)"
     )
+    parser.add_argument(
+        "--cache-status",
+        action="store_true",
+        help="Show cache status for all scoring systems"
+    )
 
     args = parser.parse_args()
 
     # Initialize components
     logger.info("Initializing Best Ball analyzer...")
     db = DatabaseManager(db_path=args.db_path)
+
+    # Show cache status if requested or before analysis
+    if args.cache_status:
+        show_cache_status(db)
+        return
+
+    # Always show cache status before analysis
+    show_cache_status(db)
+
     scoring_system = getattr(args, 'scoring_system', 'draftkings')
     analyzer = WeeklyAnalyzer(db, scoring_system=scoring_system)
     logger.info(f"Using {scoring_system} scoring system")
