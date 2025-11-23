@@ -84,9 +84,9 @@ def analyze_top_bestball_players(
     header = f"{'Rank':<5} {'Player Name':<{player_name_width}}"
     if show_type:
         header += f" {'Type':<{type_width}}"
-    header += f" {'BB Score':<9} {'Best Week':<10} {'Top3 Avg':<10} {'Boom%':<8} {'TEAR3':<7} {'TEAR4':<7}"
+    header += f" {'BB Score':<9} {'IV':<6} {'Tier':<9} {'Best Week':<10} {'Top3 Avg':<10} {'Boom%':<8} {'TEAR3':<7}"
     print(header)
-    print("-"*100)
+    print("-"*110)
 
     for idx, player in enumerate(top_players, 1):
         row = f"{idx:<5} {player['player_name']:<{player_name_width}}"
@@ -94,21 +94,35 @@ def analyze_top_bestball_players(
             player_type = player.get('player_type', 'unknown')
             type_abbr = 'BAT' if player_type == 'batting' else 'PIT'
             row += f" {type_abbr:<{type_width}}"
-        row += (f" {player['bestball_score']:<9.1f} {player['best_week']:<10.1f} "
-                f"{player['top3_weeks_avg']:<10.1f} {player['boom_week_rate']:<8.1f} "
-                f"{player['tear3_rate']:<7.1f} {player['tear4_rate']:<7.1f}")
+
+        # Get IV and tier
+        iv = player.get('implied_volatility', 0.0)
+        iv_tier = player.get('iv_tier', 'N/A')
+
+        row += (f" {player['bestball_score']:<9.1f} {iv:<6.2f} {iv_tier:<9} "
+                f"{player['best_week']:<10.1f} {player['top3_weeks_avg']:<10.1f} "
+                f"{player['boom_week_rate']:<8.1f} {player['tear3_rate']:<7.1f}")
         print(row)
 
-    print("="*100)
+    print("="*110)
     print("\nColumn Definitions:")
     if show_type:
         print("  Type        : Player type (BAT=batting, PIT=pitching)")
     print("  BB Score    : Best Ball composite score (0-100, higher = better)")
-    print("  Best Week   : Highest 7-day rolling window DK points")
+    print("  IV          : Implied Volatility (player weekly σ / league median σ)")
+    print("                1.0 = normal, 1.35+ = High-IV, 1.60+ = Gamma, 2.0+ = Nuclear")
+    print("  Tier        : IV classification (Nuclear/Gamma/High-IV/Normal/Low-Vol)")
+    print("  Best Week   : Highest 7-day rolling window points")
     print("  Top3 Avg    : Average of top 3 weekly scores")
     print("  Boom%       : Percentage of weeks in 90th percentile+")
     print("  TEAR3       : Rate of 3+ game hot streaks (per 100 games)")
-    print("  TEAR4       : Rate of 4+ game hot streaks (per 100 games)")
+    print()
+    print("💡 IMPLIED VOLATILITY (IV): Normalized weekly explosiveness vs league average")
+    print("   IV >= 2.0  = Nuclear (extreme weekly variance, tournament bombs)")
+    print("   IV >= 1.60 = Gamma Tier (very high volatility)")
+    print("   IV >= 1.35 = High-IV Tier (above-average explosiveness)")
+    print("   IV ~  1.0  = Normal volatility")
+    print("   IV <  1.0  = Low-Vol (boring for Best Ball)")
     print()
 
 
@@ -171,6 +185,22 @@ def show_player_detail(
         print(f"  TEAR5 (5+ games):      {metrics['tear5_rate']:.1f} per 100 games ({metrics['tear5_count']} total)")
         print(f"  Longest Tear:          {metrics['longest_tear']} consecutive hot games")
         print(f"  Tear Threshold:        {metrics['tear_threshold']:.1f} points (75th percentile)")
+
+        print("\nIMPLIED VOLATILITY (IV):")
+        iv = metrics.get('implied_volatility', 0.0)
+        iv_tier = metrics.get('iv_tier', 'N/A')
+        print(f"  Implied Volatility:    {iv:.2f} ({iv_tier} Tier)")
+        print(f"  Weekly Std Dev:        {metrics['std_week_points']:.2f} points")
+        if iv >= 2.0:
+            print(f"  🔥 NUCLEAR IV - Extreme weekly variance, perfect for tournaments!")
+        elif iv >= 1.60:
+            print(f"  💥 GAMMA TIER - Very high volatility, elite Best Ball asset")
+        elif iv >= 1.35:
+            print(f"  ⚡ HIGH-IV TIER - Above-average explosiveness")
+        elif iv >= 1.0:
+            print(f"  ✓ Normal volatility")
+        else:
+            print(f"  ⚠️  Low volatility - not ideal for Best Ball")
 
         print("\nOVERALL BEST BALL SCORE:")
         print(f"  Best Ball Score:       {metrics['bestball_score']:.1f} / 100")
