@@ -50,9 +50,10 @@ tableHeaders.addEventListener('click', (e) => {
     }
 });
 
-// Load database stats on page load
+// Initialize on page load
 loadDatabaseStats();
 updateScoringInfo();
+updateTableHeaders();  // Initialize table headers with correct columns
 
 /**
  * Update scoring system info in footer
