@@ -32,6 +32,7 @@ class WeeklyAnalyzer:
         self.db = db_manager
         self.scoring_system = scoring_system
         self.multi_scoring = MultiScoringCalculator()
+        self._league_median_volatility_cache = {}  # Cache for league median std devs
         logger.info(f"WeeklyAnalyzer initialized with scoring system: {scoring_system}")
 
     def _get_points(self, player_game) -> float:
@@ -440,6 +441,25 @@ class WeeklyAnalyzer:
         cv = metrics['std_week_points'] / metrics['mean_week_points'] if metrics['mean_week_points'] > 0 else 0
         metrics['weekly_cv'] = float(cv)
 
+        # IMPLIED VOLATILITY (IV) - Options-inspired metric
+        # Measures how explosive a player is relative to league average
+        # IV = player's weekly std dev / league median weekly std dev
+        league_median_vol = self._get_league_median_volatility(stats_type, min_games)
+        iv = metrics['std_week_points'] / league_median_vol if league_median_vol > 0 else 1.0
+        metrics['implied_volatility'] = float(iv)
+
+        # IV Tier classification
+        if iv >= 2.0:
+            metrics['iv_tier'] = "Nuclear"
+        elif iv >= 1.60:
+            metrics['iv_tier'] = "Gamma"
+        elif iv >= 1.35:
+            metrics['iv_tier'] = "High-IV"
+        elif iv >= 1.0:
+            metrics['iv_tier'] = "Normal"
+        else:
+            metrics['iv_tier'] = "Low-Vol"
+
         # Best Ball Score (composite metric for weekly formats)
         metrics['bestball_score'] = self._calculate_bestball_score(metrics)
 
@@ -701,13 +721,98 @@ class WeeklyAnalyzer:
         finally:
             session.close()
 
+    def _get_league_median_volatility(self, stats_type: str = "batting", min_games: int = 20) -> float:
+        """
+        Calculate league-wide median weekly volatility (standard deviation).
+
+        This is used to compute Implied Volatility (IV) - a normalized measure
+        of how explosive a player is relative to the league average.
+
+        IV = player_weekly_std / league_median_weekly_std
+
+        Args:
+            stats_type: 'batting' or 'pitching'
+            min_games: Minimum games required to include player
+
+        Returns:
+            Median weekly standard deviation across all qualifying players
+        """
+        # Check cache first
+        cache_key = f'{stats_type}_{min_games}'
+        if cache_key in self._league_median_volatility_cache:
+            return self._league_median_volatility_cache[cache_key]
+
+        session = self.db.get_session()
+        try:
+            from sqlalchemy import func
+            from ..database.models import PlayerGame
+
+            # Get all players with sufficient games
+            player_ids_query = session.query(
+                PlayerGame.player_id
+            ).filter(
+                PlayerGame.stats_type == stats_type
+            ).group_by(
+                PlayerGame.player_id
+            ).having(
+                func.count(PlayerGame.game_pk) >= min_games
+            ).all()
+
+            if not player_ids_query:
+                logger.warning(f"No players found for league median volatility, using fallback")
+                return 15.0 if stats_type == "batting" else 18.0
+
+            player_ids = [p[0] for p in player_ids_query]
+
+            # Collect weekly std devs from all players
+            weekly_std_devs = []
+
+            for player_id in player_ids:
+                # Get rolling windows for this player
+                rolling_df = self.get_player_rolling_windows(player_id, stats_type, window_days=7)
+
+                if rolling_df.empty or len(rolling_df) < 5:
+                    continue
+
+                window_points = rolling_df['window_points'].values
+                weekly_std = float(np.std(window_points, ddof=1))
+
+                if weekly_std > 0:  # Only include players with some volatility
+                    weekly_std_devs.append(weekly_std)
+
+            if not weekly_std_devs or len(weekly_std_devs) < 10:
+                logger.warning(f"Insufficient data for league median volatility, using fallback")
+                return 15.0 if stats_type == "batting" else 18.0
+
+            # Calculate median
+            median_volatility = float(np.median(weekly_std_devs))
+
+            # Sanity check
+            if median_volatility < 5.0:
+                logger.warning(f"Calculated median volatility too low ({median_volatility:.2f}), using minimum")
+                median_volatility = 15.0 if stats_type == "batting" else 18.0
+
+            # Cache the result
+            self._league_median_volatility_cache[cache_key] = median_volatility
+
+            logger.info(f"Calculated league median weekly volatility for {stats_type}: {median_volatility:.2f} (from {len(weekly_std_devs)} players)")
+
+            return median_volatility
+
+        except Exception as e:
+            logger.error(f"Error calculating league median volatility: {e}")
+            return 15.0 if stats_type == "batting" else 18.0
+
+        finally:
+            session.close()
+
     def _calculate_bestball_score(self, metrics: Dict) -> float:
         """
         Calculate a composite Best Ball score (0-100).
         Higher = better for best ball formats.
 
-        Emphasizes USEFUL metrics (starting-worthy production) over single-week spikes.
-        For 13 batter / 7 pitcher leagues, consistency matters more than one big week.
+        Emphasizes USEFUL metrics (starting-worthy production) and IMPLIED VOLATILITY
+        (relative explosiveness vs league average).
 
         Args:
             metrics: Dictionary of weekly metrics
@@ -728,24 +833,30 @@ class WeeklyAnalyzer:
         # TEAR3+ rate (3+ game hot streaks - creates multiple good weeks)
         tear_score = min(100, metrics['tear3_rate'] * 5)
 
+        # IMPLIED VOLATILITY (IV) - Normalized explosiveness relative to league
+        # IV = player weekly std / league median weekly std
+        # Scale: IV of 1.0 = 50 score, IV of 2.0 = 100 score
+        iv = metrics.get('implied_volatility', 1.0)
+        iv_score = min(100, (iv - 0.5) * 100)  # 0.5 IV = 0, 1.5 IV = 100
+
         # Top weeks average (typical ceiling when they're hot)
         top3_score = min(100, metrics['top3_weeks_avg'] * 2)
 
         # Top 5 weeks concentration (spike-iness)
         concentration_score = min(100, metrics['top5_weeks_pct'])
 
-        # Best single week (nice to have, but not critical)
-        best_week_score = min(100, metrics['best_week'] * 1.5)
-
-        # Weighted combination - USEFUL and boom/tear frequency dominate
+        # Weighted combination - USEFUL and IV dominate
+        # Removed best_week_score entirely (was 5%)
+        # Reduced top3_score from 10% to 5%
+        # Added IV at 10% (captures explosiveness better than best_week)
         bestball_score = (
             useful_concentration * 0.25 +    # Pts per useful week (when good, how good?)
             useful_frequency * 0.20 +        # % of weeks that are starting-worthy
             boom_score * 0.20 +              # Elite week frequency
             tear_score * 0.15 +              # Multi-game hot streak ability
-            top3_score * 0.10 +              # Typical ceiling weeks
-            concentration_score * 0.05 +     # General spike-iness
-            best_week_score * 0.05           # Best week ever (minimal weight)
+            iv_score * 0.10 +                # IMPLIED VOLATILITY - normalized explosiveness (NEW!)
+            top3_score * 0.05 +              # Typical ceiling weeks (reduced from 10%)
+            concentration_score * 0.05       # General spike-iness
         )
 
         return round(bestball_score, 2)
@@ -897,6 +1008,10 @@ class WeeklyAnalyzer:
                                 'tear4_rate': metrics['tear4_rate'],
                                 'longest_tear': metrics['longest_tear'],
                                 'mean_week_points': metrics['mean_week_points'],
+                                # IMPLIED VOLATILITY (IV)
+                                'implied_volatility': metrics.get('implied_volatility', 0.0),
+                                'iv_tier': metrics.get('iv_tier', 'N/A'),
+                                'std_week_points': metrics.get('std_week_points', 0.0),
                                 # USEFUL metrics
                                 'useful_points_total': metrics.get('useful_points_total', 0),
                                 'useful_weeks_count': metrics.get('useful_weeks_count', 0),
