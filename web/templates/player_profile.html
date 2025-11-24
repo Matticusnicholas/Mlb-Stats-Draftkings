@@ -204,7 +204,7 @@
             <!-- Top Weeks Bar Chart -->
             <div class="chart-container">
                 <h2>🏆 Top 5 Weeks</h2>
-                <p>The player's <strong>5 best weeks</strong> of the season. In Best Ball, these are the weeks that win you tournaments. Top 5 concentration: <strong>{{ "%.1f"|format(metrics.top5_weeks_pct) }}%</strong> of total points.</p>
+                <p>The player's <strong>5 best weeks</strong> of the season. In Best Ball, these are the weeks that win you tournaments.{% if metrics.get('top5_weeks_pct') %} Top 5 concentration: <strong>{{ "%.1f"|format(metrics.top5_weeks_pct) }}%</strong> of total points.{% endif %}</p>
                 <div class="chart-wrapper">
                     <canvas id="topWeeksChart"></canvas>
                 </div>
