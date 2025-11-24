@@ -355,9 +355,6 @@ def player_profile(player_id):
         stats_type = request.args.get('stats_type', 'batting')
         scoring_system = request.args.get('scoring_system', 'draftkings')
 
-        # Initialize analyzer
-        analyzer = WeeklyAnalyzer(db, scoring_system=scoring_system)
-
         # Get player info
         from src.database.models import Player
         session = db.get_session()
@@ -367,31 +364,62 @@ def player_profile(player_id):
             session.close()
             return "Player not found", 404
 
-        # Get detailed metrics
-        metrics = analyzer.calculate_weekly_volatility(player_id, stats_type, min_games=10)
+        # Try to load from cache first (for instant loading)
+        cache_file = BATTING_CACHE if stats_type == 'batting' else PITCHING_CACHE
+        cached_player = None
+        metrics = None
+        chart_data = None
 
-        if not metrics:
-            session.close()
-            return "Insufficient data for this player", 404
+        if os.path.exists(cache_file):
+            try:
+                with open(cache_file, 'r') as f:
+                    cache_data = json.load(f)
+                    # Find this player in the cache
+                    for p in cache_data.get('players', []):
+                        if p['player_id'] == player_id:
+                            cached_player = p
+                            break
 
-        # Get rolling windows data for visualization
-        rolling_df = analyzer.get_player_rolling_windows(player_id, stats_type, window_days=7)
-        sequential_df = analyzer.get_player_sequential_weeks(player_id, stats_type, days_per_week=7)
+                if cached_player:
+                    # Use cached data for instant loading!
+                    metrics = cached_player  # The full player dict contains all metrics
+                    chart_data = cached_player.get('chart_data', None)
 
-        # Prepare chart data
-        import pandas as pd
-        chart_data = {
-            'rolling_windows': {
-                'dates': (pd.to_datetime(rolling_df['end_date']).dt.strftime('%Y-%m-%d').tolist()
-                          if not rolling_df.empty else []),
-                'points': rolling_df['window_points'].tolist() if not rolling_df.empty else []
-            },
-            'sequential_weeks': {
-                'week_numbers': list(range(1, len(sequential_df) + 1)) if not sequential_df.empty else [],
-                'points': sequential_df['week_points'].tolist() if not sequential_df.empty else [],
-                'useful_threshold': metrics.get('useful_threshold', 0)
+            except Exception as e:
+                logger.warning(f"Cache read error, falling back to live calculation: {e}")
+
+        # Fall back to live calculation if cache not available
+        if not metrics or not chart_data:
+            logger.info(f"Cache miss for player {player_id}, calculating live...")
+
+            # Initialize analyzer
+            analyzer = WeeklyAnalyzer(db, scoring_system=scoring_system)
+
+            # Get detailed metrics
+            metrics = analyzer.calculate_weekly_volatility(player_id, stats_type, min_games=10)
+
+            if not metrics:
+                session.close()
+                return "Insufficient data for this player", 404
+
+            # Get rolling windows data for visualization
+            rolling_df = analyzer.get_player_rolling_windows(player_id, stats_type, window_days=7)
+            sequential_df = analyzer.get_player_sequential_weeks(player_id, stats_type, days_per_week=7)
+
+            # Prepare chart data
+            import pandas as pd
+            chart_data = {
+                'rolling_windows': {
+                    'dates': (pd.to_datetime(rolling_df['end_date']).dt.strftime('%Y-%m-%d').tolist()
+                              if not rolling_df.empty else []),
+                    'points': rolling_df['window_points'].tolist() if not rolling_df.empty else []
+                },
+                'sequential_weeks': {
+                    'week_numbers': list(range(1, len(sequential_df) + 1)) if not sequential_df.empty else [],
+                    'points': sequential_df['week_points'].tolist() if not sequential_df.empty else [],
+                    'useful_threshold': metrics.get('useful_threshold', 0)
+                }
             }
-        }
 
         session.close()
 
