@@ -203,10 +203,31 @@ function renderTable() {
             row.appendChild(posCell);
         }
 
-        // Player Name
+        // Player Name with Profile Button
         const nameCell = document.createElement('td');
         nameCell.className = 'player-name';
-        nameCell.textContent = player.player_name;
+
+        const nameContainer = document.createElement('div');
+        nameContainer.style.display = 'flex';
+        nameContainer.style.alignItems = 'center';
+        nameContainer.style.gap = '8px';
+
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = player.player_name;
+
+        const profileBtn = document.createElement('a');
+        profileBtn.href = `/player/${player.player_id}?stats_type=${currentStatsType}&scoring_system=${currentScoringSystem}`;
+        profileBtn.target = '_blank';
+        profileBtn.className = 'profile-btn';
+        profileBtn.title = 'View Player Profile';
+        profileBtn.innerHTML = '📊';
+        profileBtn.style.fontSize = '14px';
+        profileBtn.style.cursor = 'pointer';
+        profileBtn.style.textDecoration = 'none';
+
+        nameContainer.appendChild(nameSpan);
+        nameContainer.appendChild(profileBtn);
+        nameCell.appendChild(nameContainer);
         row.appendChild(nameCell);
 
         // Base stats with percentile bars

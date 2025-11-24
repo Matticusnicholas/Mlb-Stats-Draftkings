@@ -9,6 +9,10 @@ import os
 import json
 from datetime import datetime
 import tempfile
+import logging
+
+# Setup logger
+logger = logging.getLogger(__name__)
 
 # Add parent directory to path to import from src
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -336,6 +340,73 @@ def export_rankings():
             'success': False,
             'error': str(e)
         }), 500
+
+
+@app.route('/player/<int:player_id>', methods=['GET'])
+def player_profile(player_id):
+    """
+    Show detailed player profile with visualizations.
+
+    Query params:
+        stats_type: 'batting' or 'pitching' (default: batting)
+        scoring_system: Scoring system (default: draftkings)
+    """
+    try:
+        stats_type = request.args.get('stats_type', 'batting')
+        scoring_system = request.args.get('scoring_system', 'draftkings')
+
+        # Initialize analyzer
+        analyzer = WeeklyAnalyzer(db, scoring_system=scoring_system)
+
+        # Get player info
+        from src.database.models import Player
+        session = db.get_session()
+        player = session.query(Player).filter_by(player_id=player_id).first()
+
+        if not player:
+            session.close()
+            return "Player not found", 404
+
+        # Get detailed metrics
+        metrics = analyzer.calculate_weekly_volatility(player_id, stats_type, min_games=10)
+
+        if not metrics:
+            session.close()
+            return "Insufficient data for this player", 404
+
+        # Get rolling windows data for visualization
+        rolling_df = analyzer.get_player_rolling_windows(player_id, stats_type, window_days=7)
+        sequential_df = analyzer.get_player_sequential_weeks(player_id, stats_type, days_per_week=7)
+
+        # Prepare chart data
+        import pandas as pd
+        chart_data = {
+            'rolling_windows': {
+                'dates': (pd.to_datetime(rolling_df['end_date']).dt.strftime('%Y-%m-%d').tolist()
+                          if not rolling_df.empty else []),
+                'points': rolling_df['window_points'].tolist() if not rolling_df.empty else []
+            },
+            'sequential_weeks': {
+                'week_numbers': list(range(1, len(sequential_df) + 1)) if not sequential_df.empty else [],
+                'points': sequential_df['week_points'].tolist() if not sequential_df.empty else [],
+                'useful_threshold': metrics.get('useful_threshold', 0)
+            }
+        }
+
+        session.close()
+
+        return render_template(
+            'player_profile.html',
+            player=player,
+            metrics=metrics,
+            chart_data=chart_data,
+            stats_type=stats_type,
+            scoring_system=scoring_system
+        )
+
+    except Exception as e:
+        logger.error(f"Error loading player profile: {e}")
+        return f"Error loading player profile: {str(e)}", 500
 
 
 if __name__ == '__main__':
