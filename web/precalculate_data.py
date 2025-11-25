@@ -19,9 +19,10 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 CACHE_DIR = os.path.join(os.path.dirname(__file__), 'cache')
-BATTING_CACHE = os.path.join(CACHE_DIR, 'batting_players.json')
-PITCHING_CACHE = os.path.join(CACHE_DIR, 'pitching_players.json')
-COMBINED_CACHE = os.path.join(CACHE_DIR, 'combined_players.json')
+
+def get_cache_filename(stats_type, scoring_system='draftkings'):
+    """Generate cache filename based on stats type and scoring system."""
+    return os.path.join(CACHE_DIR, f'{stats_type}_players_{scoring_system}.json')
 
 
 def add_chart_data_to_players(players, analyzer, stats_type):
@@ -69,16 +70,16 @@ def add_chart_data_to_players(players, analyzer, stats_type):
     return players
 
 
-def precalculate_all_players():
-    """Pre-calculate Best Ball metrics for all players and save to JSON."""
-    # Create cache directory if it doesn't exist
-    os.makedirs(CACHE_DIR, exist_ok=True)
+def precalculate_for_scoring_system(scoring_system='draftkings'):
+    """Pre-calculate Best Ball metrics for all players for a specific scoring system."""
+    logger.info(f"\n{'='*60}")
+    logger.info(f"PROCESSING SCORING SYSTEM: {scoring_system.upper()}")
+    logger.info(f"{'='*60}")
 
     DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'mlb_stats.db')
 
-    logger.info("Initializing database and analyzer...")
     db = DatabaseManager(DB_PATH)
-    weekly_analyzer = WeeklyAnalyzer(db)
+    weekly_analyzer = WeeklyAnalyzer(db, scoring_system=scoring_system)
 
     # Get database stats
     stats = db.get_database_stats()
@@ -103,13 +104,15 @@ def precalculate_all_players():
     batting_players = add_chart_data_to_players(batting_players, weekly_analyzer, 'batting')
 
     # Save batting to JSON
-    logger.info(f"Saving batting data to {BATTING_CACHE}...")
+    batting_cache = get_cache_filename('batting', scoring_system)
+    logger.info(f"Saving batting data to {batting_cache}...")
     cache_data = {
         'generated_at': datetime.now().isoformat(),
+        'scoring_system': scoring_system,
         'count': len(batting_players),
         'players': batting_players
     }
-    with open(BATTING_CACHE, 'w') as f:
+    with open(batting_cache, 'w') as f:
         json.dump(cache_data, f, indent=2)
     logger.info("✓ Batting cache saved")
 
@@ -132,13 +135,15 @@ def precalculate_all_players():
     pitching_players = add_chart_data_to_players(pitching_players, weekly_analyzer, 'pitching')
 
     # Save pitching to JSON
-    logger.info(f"Saving pitching data to {PITCHING_CACHE}...")
+    pitching_cache = get_cache_filename('pitching', scoring_system)
+    logger.info(f"Saving pitching data to {pitching_cache}...")
     cache_data = {
         'generated_at': datetime.now().isoformat(),
+        'scoring_system': scoring_system,
         'count': len(pitching_players),
         'players': pitching_players
     }
-    with open(PITCHING_CACHE, 'w') as f:
+    with open(pitching_cache, 'w') as f:
         json.dump(cache_data, f, indent=2)
     logger.info("✓ Pitching cache saved")
 
@@ -200,31 +205,72 @@ def precalculate_all_players():
     logger.info(f"  - {pitching_count} pitching players")
 
     # Save combined to JSON
-    logger.info(f"Saving combined data to {COMBINED_CACHE}...")
+    combined_cache = get_cache_filename('combined', scoring_system)
+    logger.info(f"Saving combined data to {combined_cache}...")
     cache_data = {
         'generated_at': datetime.now().isoformat(),
+        'scoring_system': scoring_system,
         'count': len(combined_players),
         'batting_count': batting_count,
         'pitching_count': pitching_count,
         'players': combined_players
     }
-    with open(COMBINED_CACHE, 'w') as f:
+    with open(combined_cache, 'w') as f:
         json.dump(cache_data, f, indent=2)
     logger.info("✓ Combined cache saved")
 
-    # Summary
-    logger.info("\n" + "="*60)
-    logger.info("PRE-CALCULATION COMPLETE")
-    logger.info("="*60)
+    # Summary for this scoring system
+    logger.info(f"\n✓ {scoring_system.upper()} COMPLETE")
     logger.info(f"Batting players analyzed: {len(batting_players)}")
     logger.info(f"Pitching players analyzed: {len(pitching_players)}")
     logger.info(f"Combined players analyzed: {len(combined_players)}")
-    logger.info(f"Total players: {len(batting_players) + len(pitching_players)}")
-    logger.info(f"\nCache files created:")
-    logger.info(f"  - {BATTING_CACHE}")
-    logger.info(f"  - {PITCHING_CACHE}")
-    logger.info(f"  - {COMBINED_CACHE}")
-    logger.info("\nThe web app will now load INSTANTLY from these cache files!")
+    logger.info(f"Cache files created:")
+    logger.info(f"  - {batting_cache}")
+    logger.info(f"  - {pitching_cache}")
+    logger.info(f"  - {combined_cache}")
+
+    return {
+        'batting_count': len(batting_players),
+        'pitching_count': len(pitching_players),
+        'combined_count': len(combined_players)
+    }
+
+
+def precalculate_all_players():
+    """Pre-calculate Best Ball metrics for all players across ALL scoring systems."""
+    # Create cache directory if it doesn't exist
+    os.makedirs(CACHE_DIR, exist_ok=True)
+
+    logger.info("\n" + "="*60)
+    logger.info("PRE-CALCULATING DATA FOR ALL SCORING SYSTEMS")
+    logger.info("="*60)
+    logger.info("This will generate caches for:")
+    logger.info("  • DraftKings")
+    logger.info("  • Underdog Fantasy")
+    logger.info("  • Drafters")
+    logger.info("="*60)
+
+    scoring_systems = ['draftkings', 'underdog', 'drafters']
+    results = {}
+
+    for scoring_system in scoring_systems:
+        results[scoring_system] = precalculate_for_scoring_system(scoring_system)
+
+    # Final summary
+    logger.info("\n" + "="*60)
+    logger.info("ALL SCORING SYSTEMS COMPLETE")
+    logger.info("="*60)
+
+    for scoring_system in scoring_systems:
+        r = results[scoring_system]
+        logger.info(f"\n{scoring_system.upper()}:")
+        logger.info(f"  Batting: {r['batting_count']} players")
+        logger.info(f"  Pitching: {r['pitching_count']} players")
+        logger.info(f"  Combined: {r['combined_count']} players")
+
+    total_caches = len(scoring_systems) * 3  # 3 cache files per scoring system
+    logger.info(f"\n✓ Generated {total_caches} cache files total")
+    logger.info("\nThe web app will now load INSTANTLY for ALL scoring systems!")
 
 
 if __name__ == '__main__':

@@ -30,40 +30,33 @@ db = DatabaseManager(DB_PATH)
 
 # Cache file paths
 CACHE_DIR = os.path.join(os.path.dirname(__file__), 'cache')
-BATTING_CACHE = os.path.join(CACHE_DIR, 'batting_players.json')
-PITCHING_CACHE = os.path.join(CACHE_DIR, 'pitching_players.json')
-COMBINED_CACHE = os.path.join(CACHE_DIR, 'combined_players.json')
 
-# In-memory cache
-_player_cache = {
-    'batting': None,
-    'pitching': None,
-    'combined': None
-}
+def get_cache_filename(stats_type, scoring_system='draftkings'):
+    """Generate cache filename based on stats type and scoring system."""
+    return os.path.join(CACHE_DIR, f'{stats_type}_players_{scoring_system}.json')
+
+# In-memory cache - now includes scoring system
+_player_cache = {}
 
 
-def load_cached_players(stats_type='batting'):
-    """Load pre-calculated players from JSON cache."""
-    # Select appropriate cache file
-    if stats_type == 'batting':
-        cache_file = BATTING_CACHE
-    elif stats_type == 'pitching':
-        cache_file = PITCHING_CACHE
-    elif stats_type == 'combined':
-        cache_file = COMBINED_CACHE
-    else:
-        print(f"WARNING: Unknown stats_type: {stats_type}")
-        return None
+def load_cached_players(stats_type='batting', scoring_system='draftkings'):
+    """Load pre-calculated players from JSON cache for specific scoring system."""
+    # Get cache file for this stats_type and scoring_system
+    cache_file = get_cache_filename(stats_type, scoring_system)
 
     # Check if cache exists
     if not os.path.exists(cache_file):
         print(f"WARNING: Cache file not found: {cache_file}")
         print("Run 'python web/precalculate_data.py' to generate cache files.")
+        print("Cache not available, calculating live...")
         return None
 
+    # Create cache key including scoring system
+    cache_key = f"{stats_type}_{scoring_system}"
+
     # Check if already loaded in memory
-    if _player_cache[stats_type] is not None:
-        return _player_cache[stats_type]
+    if cache_key in _player_cache and _player_cache[cache_key] is not None:
+        return _player_cache[cache_key]
 
     # Load from file
     try:
@@ -71,9 +64,9 @@ def load_cached_players(stats_type='batting'):
             cache_data = json.load(f)
 
         players = cache_data.get('players', [])
-        _player_cache[stats_type] = players
+        _player_cache[cache_key] = players
 
-        print(f"✓ Loaded {len(players)} {stats_type} players from cache (generated: {cache_data.get('generated_at', 'unknown')})")
+        print(f"✓ Loaded {len(players)} {stats_type} players from cache ({scoring_system}, generated: {cache_data.get('generated_at', 'unknown')})")
         return players
     except Exception as e:
         print(f"ERROR loading cache: {e}")
@@ -107,17 +100,14 @@ def get_players():
         sort_by = request.args.get('sort_by', 'bestball_score')
         use_cache = request.args.get('use_cache', 'true').lower() == 'true'
 
-        # Cache only available for DraftKings scoring
+        # Try to load from cache for any scoring system
         players = None
-        if use_cache and scoring_system == 'draftkings':
-            players = load_cached_players(stats_type)
+        if use_cache:
+            players = load_cached_players(stats_type, scoring_system)
 
-        # Fall back to live calculation if cache not available or different scoring system
+        # Fall back to live calculation if cache not available
         if players is None:
-            if scoring_system != 'draftkings':
-                print(f"Using {scoring_system} scoring (live calculation)...")
-            else:
-                print(f"Cache not available, calculating live...")
+            print(f"Cache not available for {scoring_system}, calculating live...")
 
             # Create analyzer with selected scoring system
             weekly_analyzer = WeeklyAnalyzer(db, scoring_system=scoring_system)
@@ -144,12 +134,13 @@ def get_players():
         # Calculate percentiles for each stat
         players_with_percentiles = calculate_percentiles(players)
 
+        cache_key = f"{stats_type}_{scoring_system}"
         return jsonify({
             'success': True,
             'players': players_with_percentiles,
             'count': len(players_with_percentiles),
             'scoring_system': scoring_system,
-            'from_cache': use_cache and scoring_system == 'draftkings' and _player_cache.get(stats_type) is not None
+            'from_cache': use_cache and cache_key in _player_cache and _player_cache[cache_key] is not None
         })
 
     except Exception as e:
@@ -365,7 +356,7 @@ def player_profile(player_id):
             return "Player not found", 404
 
         # Try to load from cache first (for instant loading)
-        cache_file = BATTING_CACHE if stats_type == 'batting' else PITCHING_CACHE
+        cache_file = get_cache_filename(stats_type, scoring_system)
         cached_player = None
         metrics = None
         chart_data = None
