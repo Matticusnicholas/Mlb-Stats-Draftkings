@@ -444,42 +444,140 @@ def draft_simulator():
     return render_template('draft_simulator.html')
 
 
+@app.route('/api/draft/debug')
+def draft_debug():
+    """Debug endpoint - check cache status directly in browser."""
+    batting_path = os.path.join(CACHE_DIR, 'batting_players.json')
+    pitching_path = os.path.join(CACHE_DIR, 'pitching_players.json')
+
+    result = {
+        'cache_dir': CACHE_DIR,
+        'cache_dir_exists': os.path.exists(CACHE_DIR),
+        'batting_cache': {
+            'path': batting_path,
+            'exists': os.path.exists(batting_path),
+            'size': os.path.getsize(batting_path) if os.path.exists(batting_path) else 0
+        },
+        'pitching_cache': {
+            'path': pitching_path,
+            'exists': os.path.exists(pitching_path),
+            'size': os.path.getsize(pitching_path) if os.path.exists(pitching_path) else 0
+        }
+    }
+
+    # Try to load and count players
+    if os.path.exists(batting_path):
+        try:
+            with open(batting_path) as f:
+                data = json.load(f)
+                result['batting_cache']['player_count'] = len(data.get('players', []))
+                if data.get('players'):
+                    result['batting_cache']['sample_player'] = data['players'][0]
+        except Exception as e:
+            result['batting_cache']['load_error'] = str(e)
+
+    if os.path.exists(pitching_path):
+        try:
+            with open(pitching_path) as f:
+                data = json.load(f)
+                result['pitching_cache']['player_count'] = len(data.get('players', []))
+        except Exception as e:
+            result['pitching_cache']['load_error'] = str(e)
+
+    # List cache directory contents
+    if os.path.exists(CACHE_DIR):
+        result['cache_contents'] = os.listdir(CACHE_DIR)
+
+    return jsonify(result)
+
+
 @app.route('/api/draft/players', methods=['GET'])
 def get_draft_players():
     """
     Get available players for drafting with position info.
-
-    Query params:
-        scoring_system: Platform scoring ('draftkings', 'underdog', 'drafters')
-        min_games: Minimum games played
-        limit: Maximum players per category
+    Loads directly from cache files for reliability.
     """
     try:
-        scoring_system = request.args.get('scoring_system', 'draftkings')
         min_games = int(request.args.get('min_games', 20))
         limit = int(request.args.get('limit', 300))
 
-        # Create draft simulator
-        simulator = DraftSimulator(db, scoring_system=scoring_system)
+        # Load directly from cache files (most reliable)
+        batting_cache_path = os.path.join(CACHE_DIR, 'batting_players.json')
+        pitching_cache_path = os.path.join(CACHE_DIR, 'pitching_players.json')
 
-        # Get player pool with positions
-        players = simulator.get_draft_pool(min_games=min_games, limit=limit)
+        players = []
+        debug_info = {
+            'batting_cache_exists': os.path.exists(batting_cache_path),
+            'pitching_cache_exists': os.path.exists(pitching_cache_path),
+            'cache_dir': CACHE_DIR,
+            'batting_path': batting_cache_path,
+            'pitching_path': pitching_cache_path
+        }
+
+        # Load batters
+        if os.path.exists(batting_cache_path):
+            with open(batting_cache_path, 'r') as f:
+                batting_data = json.load(f)
+                batters = batting_data.get('players', [])
+                debug_info['batters_in_cache'] = len(batters)
+
+                for batter in batters[:limit]:
+                    if batter.get('games_played', 0) < min_games:
+                        continue
+                    pos = batter.get('position', 'UTIL')
+                    # Derive position type
+                    if pos in ['C', '1B', '2B', '3B', 'SS']:
+                        pos_type = 'IF'
+                    elif pos in ['LF', 'CF', 'RF', 'OF']:
+                        pos_type = 'OF'
+                    elif pos in ['P', 'SP', 'RP']:
+                        pos_type = 'P'
+                    elif pos == 'C':
+                        pos_type = 'C'
+                    else:
+                        pos_type = 'UTIL'
+                    batter['position_type'] = pos_type
+                    batter['stats_type'] = 'batting'
+                    players.append(batter)
+        else:
+            debug_info['batting_error'] = 'Cache file not found'
+
+        # Load pitchers
+        if os.path.exists(pitching_cache_path):
+            with open(pitching_cache_path, 'r') as f:
+                pitching_data = json.load(f)
+                pitchers = pitching_data.get('players', [])
+                debug_info['pitchers_in_cache'] = len(pitchers)
+
+                for pitcher in pitchers[:limit]:
+                    if pitcher.get('games_played', 0) < min_games:
+                        continue
+                    pitcher['position'] = 'P'
+                    pitcher['position_type'] = 'P'
+                    pitcher['stats_type'] = 'pitching'
+                    players.append(pitcher)
+        else:
+            debug_info['pitching_error'] = 'Cache file not found'
 
         # Sort by bestball_score
         players.sort(key=lambda x: x.get('bestball_score', 0), reverse=True)
+
+        debug_info['final_player_count'] = len(players)
 
         return jsonify({
             'success': True,
             'players': players,
             'count': len(players),
-            'scoring_system': scoring_system
+            'debug': debug_info
         })
 
     except Exception as e:
+        import traceback
         logger.error(f"Error getting draft players: {e}")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': str(e),
+            'traceback': traceback.format_exc()
         }), 500
 
 
