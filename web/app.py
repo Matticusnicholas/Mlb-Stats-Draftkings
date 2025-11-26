@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from src.database.db_manager import DatabaseManager
 from src.analytics.weekly_analyzer import WeeklyAnalyzer
+from src.analytics.draft_simulator import DraftSimulator
 from src.utils.export_rankings import RankingsExporter
 
 app = Flask(__name__)
@@ -435,6 +436,130 @@ def player_profile(player_id):
     except Exception as e:
         logger.error(f"Error loading player profile: {e}")
         return f"Error loading player profile: {str(e)}", 500
+
+
+@app.route('/draft')
+def draft_simulator():
+    """Render draft simulator page."""
+    return render_template('draft_simulator.html')
+
+
+@app.route('/api/draft/players', methods=['GET'])
+def get_draft_players():
+    """
+    Get available players for drafting with position info.
+
+    Query params:
+        scoring_system: Platform scoring ('draftkings', 'underdog', 'drafters')
+        min_games: Minimum games played
+        limit: Maximum players per category
+    """
+    try:
+        scoring_system = request.args.get('scoring_system', 'draftkings')
+        min_games = int(request.args.get('min_games', 20))
+        limit = int(request.args.get('limit', 300))
+
+        # Create draft simulator
+        simulator = DraftSimulator(db, scoring_system=scoring_system)
+
+        # Get player pool with positions
+        players = simulator.get_draft_pool(min_games=min_games, limit=limit)
+
+        # Sort by bestball_score
+        players.sort(key=lambda x: x.get('bestball_score', 0), reverse=True)
+
+        return jsonify({
+            'success': True,
+            'players': players,
+            'count': len(players),
+            'scoring_system': scoring_system
+        })
+
+    except Exception as e:
+        logger.error(f"Error getting draft players: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/draft/simulate', methods=['POST'])
+def run_draft_simulation():
+    """
+    Run Monte Carlo simulation for a drafted roster.
+
+    POST body:
+        roster: List of player objects with player_id, position, stats_type
+        num_simulations: Number of simulations (100-10000)
+        method: 'bootstrap' or 'parametric'
+        platform: Scoring platform
+    """
+    try:
+        data = request.get_json()
+
+        roster = data.get('roster', [])
+        num_simulations = min(int(data.get('num_simulations', 500)), 10000)
+        method = data.get('method', 'bootstrap')
+        platform = data.get('platform', 'draftkings')
+
+        if len(roster) < 5:
+            return jsonify({
+                'success': False,
+                'error': 'Need at least 5 players to simulate'
+            }), 400
+
+        # Create simulator
+        simulator = DraftSimulator(
+            db,
+            scoring_system=platform,
+            num_simulations=num_simulations
+        )
+
+        # Run simulation
+        results = simulator.run_monte_carlo(roster, method=method)
+
+        return jsonify({
+            'success': True,
+            'results': results
+        })
+
+    except Exception as e:
+        logger.error(f"Error running simulation: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/draft/validate', methods=['POST'])
+def validate_roster():
+    """
+    Validate a roster against platform requirements.
+
+    POST body:
+        roster: List of player objects
+        platform: Platform to validate against
+    """
+    try:
+        data = request.get_json()
+        roster = data.get('roster', [])
+        platform = data.get('platform', 'draftkings')
+
+        simulator = DraftSimulator(db, scoring_system=platform)
+        validation = simulator.validate_roster(roster, platform)
+
+        return jsonify({
+            'success': True,
+            'validation': validation
+        })
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
 if __name__ == '__main__':
