@@ -1,0 +1,1044 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Draft Simulator - MLB Best Ball Analyzer</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        /* Draft Simulator specific styles */
+        .draft-container {
+            display: grid;
+            grid-template-columns: 1fr 350px;
+            gap: 25px;
+            margin-bottom: 30px;
+        }
+
+        @media (max-width: 1200px) {
+            .draft-container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .player-pool {
+            background: var(--card-background);
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            overflow: hidden;
+        }
+
+        .pool-header {
+            background: var(--primary-color);
+            color: white;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .pool-search {
+            padding: 8px 15px;
+            border: none;
+            border-radius: 4px;
+            width: 200px;
+        }
+
+        .pool-table-container {
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .pool-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .pool-table th {
+            background: #f8f8f8;
+            padding: 10px;
+            text-align: left;
+            position: sticky;
+            top: 0;
+            cursor: pointer;
+            font-size: 0.85em;
+        }
+
+        .pool-table td {
+            padding: 8px 10px;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 0.85em;
+        }
+
+        .pool-table tr:hover {
+            background: #f5f5f5;
+        }
+
+        .pool-table tr.drafted {
+            opacity: 0.4;
+            background: #eee;
+        }
+
+        .pool-table tr.selected {
+            background: #e3f2fd;
+        }
+
+        .draft-btn {
+            padding: 4px 12px;
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8em;
+        }
+
+        .draft-btn:hover {
+            background: #062a52;
+        }
+
+        .draft-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        /* My Roster Panel */
+        .my-roster {
+            background: var(--card-background);
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            position: sticky;
+            top: 20px;
+        }
+
+        .roster-header {
+            background: linear-gradient(135deg, var(--secondary-color) 0%, #a00d24 100%);
+            color: white;
+            padding: 15px 20px;
+        }
+
+        .roster-header h2 {
+            margin: 0;
+            font-size: 1.3em;
+        }
+
+        .roster-count {
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+
+        .roster-slots {
+            padding: 15px;
+        }
+
+        .slot-group {
+            margin-bottom: 15px;
+        }
+
+        .slot-group h4 {
+            color: var(--primary-color);
+            margin-bottom: 8px;
+            font-size: 0.9em;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .roster-player {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            background: #f8f8f8;
+            border-radius: 4px;
+            margin-bottom: 5px;
+            font-size: 0.85em;
+        }
+
+        .roster-player .player-info {
+            display: flex;
+            gap: 10px;
+        }
+
+        .roster-player .pos-badge {
+            background: var(--primary-color);
+            color: white;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.75em;
+            min-width: 28px;
+            text-align: center;
+        }
+
+        .remove-btn {
+            background: none;
+            border: none;
+            color: var(--secondary-color);
+            cursor: pointer;
+            font-size: 1.1em;
+        }
+
+        .empty-slot {
+            border: 2px dashed var(--border-color);
+            padding: 8px 12px;
+            border-radius: 4px;
+            margin-bottom: 5px;
+            color: #999;
+            font-size: 0.85em;
+            font-style: italic;
+        }
+
+        .simulate-section {
+            padding: 15px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .simulate-btn {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, var(--primary-color) 0%, #062a52 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 1.1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .simulate-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .simulate-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .sim-options {
+            margin-bottom: 15px;
+        }
+
+        .sim-options label {
+            display: block;
+            font-size: 0.85em;
+            color: var(--text-secondary);
+            margin-bottom: 5px;
+        }
+
+        .sim-options select,
+        .sim-options input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+
+        /* Results Section */
+        .results-section {
+            background: var(--card-background);
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            margin-bottom: 30px;
+            display: none;
+        }
+
+        .results-section.visible {
+            display: block;
+        }
+
+        .results-header {
+            background: linear-gradient(135deg, #28a745 0%, #20833a 100%);
+            color: white;
+            padding: 20px 25px;
+            border-radius: 8px 8px 0 0;
+        }
+
+        .results-header h2 {
+            margin: 0 0 5px 0;
+        }
+
+        .results-body {
+            padding: 25px;
+        }
+
+        .results-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .result-card {
+            background: #f8f8f8;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .result-card h4 {
+            color: var(--text-secondary);
+            font-size: 0.85em;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+        }
+
+        .result-value {
+            font-size: 2em;
+            font-weight: 700;
+            color: var(--primary-color);
+        }
+
+        .result-subtitle {
+            font-size: 0.8em;
+            color: var(--text-secondary);
+            margin-top: 5px;
+        }
+
+        .percentile-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 10px;
+            margin-bottom: 30px;
+        }
+
+        .percentile-card {
+            background: linear-gradient(135deg, var(--primary-color) 0%, #062a52 100%);
+            color: white;
+            padding: 15px 10px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .percentile-card .pct-label {
+            font-size: 0.75em;
+            opacity: 0.8;
+            margin-bottom: 5px;
+        }
+
+        .percentile-card .pct-value {
+            font-size: 1.3em;
+            font-weight: 700;
+        }
+
+        .charts-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 25px;
+        }
+
+        @media (max-width: 900px) {
+            .charts-container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .chart-box {
+            background: #f8f8f8;
+            padding: 20px;
+            border-radius: 8px;
+        }
+
+        .chart-box h4 {
+            margin-bottom: 15px;
+            color: var(--primary-color);
+        }
+
+        /* Position filters */
+        .position-filters {
+            display: flex;
+            gap: 8px;
+            padding: 10px 20px;
+            background: #f8f8f8;
+            flex-wrap: wrap;
+        }
+
+        .pos-filter {
+            padding: 5px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: white;
+            cursor: pointer;
+            font-size: 0.85em;
+        }
+
+        .pos-filter.active {
+            background: var(--primary-color);
+            color: white;
+            border-color: var(--primary-color);
+        }
+
+        /* Navigation */
+        .nav-bar {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .nav-link {
+            color: var(--primary-color);
+            text-decoration: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            background: var(--card-background);
+            font-weight: 600;
+        }
+
+        .nav-link:hover {
+            background: #e8e8e8;
+        }
+
+        .nav-link.active {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        /* Loading overlay */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .loading-overlay.visible {
+            display: flex;
+        }
+
+        .loading-box {
+            background: white;
+            padding: 40px 60px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .loading-box .spinner {
+            margin-bottom: 15px;
+        }
+
+        .loading-box p {
+            font-size: 1.1em;
+            color: var(--text-primary);
+        }
+
+        .loading-progress {
+            margin-top: 15px;
+            font-size: 0.9em;
+            color: var(--text-secondary);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>Draft Simulator</h1>
+            <p class="subtitle">Build your roster and simulate a full Best Ball season with Monte Carlo analysis</p>
+        </header>
+
+        <!-- Navigation -->
+        <nav class="nav-bar">
+            <a href="/" class="nav-link">Rankings</a>
+            <a href="/draft" class="nav-link active">Draft Simulator</a>
+        </nav>
+
+        <!-- Filters -->
+        <div class="filters-section">
+            <div class="filter-group">
+                <label for="platform">Platform:</label>
+                <select id="platform" class="filter-select">
+                    <option value="draftkings" selected>DraftKings</option>
+                    <option value="underdog">Underdog</option>
+                    <option value="drafters">Drafters</option>
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <label for="min-games">Min Games:</label>
+                <input type="number" id="min-games" class="filter-input" value="20" min="5" max="100">
+            </div>
+
+            <button id="load-pool-btn" class="btn-primary">Load Player Pool</button>
+            <button id="clear-roster-btn" class="btn-secondary">Clear Roster</button>
+        </div>
+
+        <!-- Draft Container -->
+        <div class="draft-container">
+            <!-- Player Pool -->
+            <div class="player-pool">
+                <div class="pool-header">
+                    <h3>Available Players</h3>
+                    <input type="text" id="player-search" class="pool-search" placeholder="Search players...">
+                </div>
+                <div class="position-filters">
+                    <button class="pos-filter active" data-pos="all">All</button>
+                    <button class="pos-filter" data-pos="P">P</button>
+                    <button class="pos-filter" data-pos="C">C</button>
+                    <button class="pos-filter" data-pos="1B">1B</button>
+                    <button class="pos-filter" data-pos="2B">2B</button>
+                    <button class="pos-filter" data-pos="3B">3B</button>
+                    <button class="pos-filter" data-pos="SS">SS</button>
+                    <button class="pos-filter" data-pos="OF">OF</button>
+                </div>
+                <div class="pool-table-container">
+                    <table class="pool-table">
+                        <thead>
+                            <tr>
+                                <th data-sort="player_name">Player</th>
+                                <th data-sort="position">Pos</th>
+                                <th data-sort="bestball_score">BB Score</th>
+                                <th data-sort="iv">IV</th>
+                                <th data-sort="useful_points_total">Useful Pts</th>
+                                <th data-sort="boom_week_rate">Boom%</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pool-tbody">
+                            <tr><td colspan="7" style="text-align: center; padding: 40px;">Click "Load Player Pool" to begin drafting</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- My Roster -->
+            <div class="my-roster">
+                <div class="roster-header">
+                    <h2>My Roster</h2>
+                    <div class="roster-count"><span id="roster-count">0</span>/20 players</div>
+                </div>
+                <div class="roster-slots" id="roster-slots">
+                    <!-- Pitchers -->
+                    <div class="slot-group" data-type="P">
+                        <h4>Pitchers <span class="slot-count">0/3</span></h4>
+                        <div class="slot-players"></div>
+                    </div>
+                    <!-- Infielders -->
+                    <div class="slot-group" data-type="IF">
+                        <h4>Infielders <span class="slot-count">0/5</span></h4>
+                        <div class="slot-players"></div>
+                    </div>
+                    <!-- Outfielders -->
+                    <div class="slot-group" data-type="OF">
+                        <h4>Outfielders <span class="slot-count">0/5</span></h4>
+                        <div class="slot-players"></div>
+                    </div>
+                    <!-- Utility -->
+                    <div class="slot-group" data-type="UTIL">
+                        <h4>Utility <span class="slot-count">0/7</span></h4>
+                        <div class="slot-players"></div>
+                    </div>
+                </div>
+                <div class="simulate-section">
+                    <div class="sim-options">
+                        <label for="num-sims">Number of Simulations:</label>
+                        <select id="num-sims">
+                            <option value="100">100 (Fast)</option>
+                            <option value="500" selected>500 (Balanced)</option>
+                            <option value="1000">1,000 (Accurate)</option>
+                            <option value="5000">5,000 (High Precision)</option>
+                        </select>
+                        <label for="sim-method">Simulation Method:</label>
+                        <select id="sim-method">
+                            <option value="bootstrap" selected>Bootstrap (Historical)</option>
+                            <option value="parametric">Parametric (Normal)</option>
+                        </select>
+                    </div>
+                    <button id="simulate-btn" class="simulate-btn" disabled>
+                        Simulate Season
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results Section -->
+        <div class="results-section" id="results-section">
+            <div class="results-header">
+                <h2>Season Simulation Results</h2>
+                <p id="results-subtitle"></p>
+            </div>
+            <div class="results-body">
+                <!-- Summary Stats -->
+                <div class="results-grid">
+                    <div class="result-card">
+                        <h4>Average Season</h4>
+                        <div class="result-value" id="result-mean">--</div>
+                        <div class="result-subtitle">points</div>
+                    </div>
+                    <div class="result-card">
+                        <h4>Median Season</h4>
+                        <div class="result-value" id="result-median">--</div>
+                        <div class="result-subtitle">50th percentile</div>
+                    </div>
+                    <div class="result-card">
+                        <h4>Weekly Average</h4>
+                        <div class="result-value" id="result-weekly">--</div>
+                        <div class="result-subtitle">pts/week</div>
+                    </div>
+                    <div class="result-card">
+                        <h4>Ceiling</h4>
+                        <div class="result-value" id="result-max">--</div>
+                        <div class="result-subtitle">best outcome</div>
+                    </div>
+                    <div class="result-card">
+                        <h4>Floor</h4>
+                        <div class="result-value" id="result-min">--</div>
+                        <div class="result-subtitle">worst outcome</div>
+                    </div>
+                </div>
+
+                <!-- Percentile Distribution -->
+                <h3 style="margin-bottom: 15px; color: var(--primary-color);">Outcome Percentiles</h3>
+                <div class="percentile-grid">
+                    <div class="percentile-card">
+                        <div class="pct-label">10th</div>
+                        <div class="pct-value" id="pct-10">--</div>
+                    </div>
+                    <div class="percentile-card">
+                        <div class="pct-label">25th</div>
+                        <div class="pct-value" id="pct-25">--</div>
+                    </div>
+                    <div class="percentile-card">
+                        <div class="pct-label">50th</div>
+                        <div class="pct-value" id="pct-50">--</div>
+                    </div>
+                    <div class="percentile-card">
+                        <div class="pct-label">75th</div>
+                        <div class="pct-value" id="pct-75">--</div>
+                    </div>
+                    <div class="percentile-card">
+                        <div class="pct-label">90th</div>
+                        <div class="pct-value" id="pct-90">--</div>
+                    </div>
+                    <div class="percentile-card">
+                        <div class="pct-label">95th</div>
+                        <div class="pct-value" id="pct-95">--</div>
+                    </div>
+                    <div class="percentile-card">
+                        <div class="pct-label">99th</div>
+                        <div class="pct-value" id="pct-99">--</div>
+                    </div>
+                </div>
+
+                <!-- Charts -->
+                <div class="charts-container">
+                    <div class="chart-box">
+                        <h4>Season Outcome Distribution</h4>
+                        <canvas id="histogram-chart"></canvas>
+                    </div>
+                    <div class="chart-box">
+                        <h4>Cumulative Probability</h4>
+                        <canvas id="cdf-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>MLB Draft Simulator • Monte Carlo Season Simulation • Best Ball Scoring</p>
+        </footer>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loading-overlay">
+        <div class="loading-box">
+            <div class="spinner"></div>
+            <p>Running Simulations...</p>
+            <div class="loading-progress" id="loading-progress">Preparing roster data</div>
+        </div>
+    </div>
+
+    <script>
+        // Draft Simulator JavaScript
+        let playerPool = [];
+        let myRoster = [];
+        let histogramChart = null;
+        let cdfChart = null;
+
+        // Position limits for flexible roster
+        const POSITION_LIMITS = {
+            'P': { min: 3, max: 5 },
+            'IF': { min: 3, max: 7 },  // C, 1B, 2B, 3B, SS
+            'OF': { min: 3, max: 7 },
+            'UTIL': { min: 0, max: 7 }  // DH and overflow
+        };
+
+        const IF_POSITIONS = ['C', '1B', '2B', '3B', 'SS'];
+        const OF_POSITIONS = ['OF', 'LF', 'CF', 'RF'];
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('load-pool-btn').addEventListener('click', loadPlayerPool);
+            document.getElementById('clear-roster-btn').addEventListener('click', clearRoster);
+            document.getElementById('simulate-btn').addEventListener('click', runSimulation);
+            document.getElementById('player-search').addEventListener('input', filterPlayers);
+
+            // Position filters
+            document.querySelectorAll('.pos-filter').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.pos-filter').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    filterPlayers();
+                });
+            });
+
+            // Table sorting
+            document.querySelectorAll('.pool-table th[data-sort]').forEach(th => {
+                th.addEventListener('click', () => sortTable(th.dataset.sort));
+            });
+        });
+
+        function getPositionType(position) {
+            if (!position) return 'UTIL';
+            const pos = position.toUpperCase();
+            if (pos === 'P' || pos === 'SP' || pos === 'RP') return 'P';
+            if (IF_POSITIONS.includes(pos)) return 'IF';
+            if (OF_POSITIONS.includes(pos)) return 'OF';
+            return 'UTIL';
+        }
+
+        async function loadPlayerPool() {
+            const platform = document.getElementById('platform').value;
+            const minGames = document.getElementById('min-games').value;
+
+            document.getElementById('pool-tbody').innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px;"><div class="spinner"></div>Loading players...</td></tr>';
+
+            try {
+                const response = await fetch(`/api/draft/players?scoring_system=${platform}&min_games=${minGames}&limit=400`);
+                const data = await response.json();
+
+                if (data.success) {
+                    playerPool = data.players;
+                    renderPlayerPool();
+                } else {
+                    alert('Error loading players: ' + data.error);
+                }
+            } catch (err) {
+                console.error('Error:', err);
+                alert('Failed to load player pool');
+            }
+        }
+
+        function renderPlayerPool() {
+            const tbody = document.getElementById('pool-tbody');
+            const searchTerm = document.getElementById('player-search').value.toLowerCase();
+            const posFilter = document.querySelector('.pos-filter.active').dataset.pos;
+
+            const filtered = playerPool.filter(p => {
+                // Search filter
+                if (searchTerm && !p.player_name.toLowerCase().includes(searchTerm)) return false;
+
+                // Position filter
+                if (posFilter !== 'all') {
+                    const playerPos = p.position || 'UTIL';
+                    if (posFilter === 'OF') {
+                        if (!OF_POSITIONS.includes(playerPos) && playerPos !== 'OF') return false;
+                    } else if (posFilter === 'P') {
+                        if (!['P', 'SP', 'RP'].includes(playerPos)) return false;
+                    } else {
+                        if (playerPos !== posFilter) return false;
+                    }
+                }
+
+                return true;
+            });
+
+            if (filtered.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px;">No players match your filters</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = filtered.map(p => {
+                const isDrafted = myRoster.some(r => r.player_id === p.player_id);
+                return `
+                    <tr class="${isDrafted ? 'drafted' : ''}" data-id="${p.player_id}">
+                        <td class="player-name">${p.player_name}</td>
+                        <td>${p.position || 'UTIL'}</td>
+                        <td>${(p.bestball_score || 0).toFixed(1)}</td>
+                        <td>${(p.iv || 0).toFixed(2)}</td>
+                        <td>${(p.useful_points_total || 0).toFixed(0)}</td>
+                        <td>${(p.boom_week_rate || 0).toFixed(1)}%</td>
+                        <td>
+                            <button class="draft-btn" onclick="draftPlayer(${p.player_id})" ${isDrafted ? 'disabled' : ''}>
+                                ${isDrafted ? 'Drafted' : 'Draft'}
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function filterPlayers() {
+            renderPlayerPool();
+        }
+
+        function sortTable(field) {
+            playerPool.sort((a, b) => {
+                const aVal = a[field] || 0;
+                const bVal = b[field] || 0;
+                if (typeof aVal === 'string') return aVal.localeCompare(bVal);
+                return bVal - aVal;  // Descending for numbers
+            });
+            renderPlayerPool();
+        }
+
+        function draftPlayer(playerId) {
+            if (myRoster.length >= 20) {
+                alert('Roster is full (20 players)');
+                return;
+            }
+
+            const player = playerPool.find(p => p.player_id === playerId);
+            if (!player) return;
+
+            myRoster.push(player);
+            updateRosterDisplay();
+            renderPlayerPool();
+        }
+
+        function removePlayer(playerId) {
+            myRoster = myRoster.filter(p => p.player_id !== playerId);
+            updateRosterDisplay();
+            renderPlayerPool();
+        }
+
+        function updateRosterDisplay() {
+            document.getElementById('roster-count').textContent = myRoster.length;
+
+            // Count by position type
+            const counts = { P: 0, IF: 0, OF: 0, UTIL: 0 };
+            myRoster.forEach(p => {
+                const type = getPositionType(p.position);
+                counts[type]++;
+            });
+
+            // Update slot groups
+            document.querySelectorAll('.slot-group').forEach(group => {
+                const type = group.dataset.type;
+                const playersDiv = group.querySelector('.slot-players');
+                const countSpan = group.querySelector('.slot-count');
+
+                const typePlayers = myRoster.filter(p => getPositionType(p.position) === type);
+
+                if (type === 'P') {
+                    countSpan.textContent = `${typePlayers.length}/3-5`;
+                } else if (type === 'IF' || type === 'OF') {
+                    countSpan.textContent = `${typePlayers.length}/3-7`;
+                } else {
+                    countSpan.textContent = `${typePlayers.length}`;
+                }
+
+                playersDiv.innerHTML = typePlayers.map(p => `
+                    <div class="roster-player">
+                        <div class="player-info">
+                            <span class="pos-badge">${p.position || 'UTIL'}</span>
+                            <span>${p.player_name}</span>
+                        </div>
+                        <button class="remove-btn" onclick="removePlayer(${p.player_id})">×</button>
+                    </div>
+                `).join('');
+
+                if (typePlayers.length === 0) {
+                    playersDiv.innerHTML = '<div class="empty-slot">Draft players to fill</div>';
+                }
+            });
+
+            // Enable/disable simulate button
+            document.getElementById('simulate-btn').disabled = myRoster.length < 10;
+        }
+
+        function clearRoster() {
+            myRoster = [];
+            updateRosterDisplay();
+            renderPlayerPool();
+            document.getElementById('results-section').classList.remove('visible');
+        }
+
+        async function runSimulation() {
+            const numSims = parseInt(document.getElementById('num-sims').value);
+            const method = document.getElementById('sim-method').value;
+            const platform = document.getElementById('platform').value;
+
+            // Show loading
+            document.getElementById('loading-overlay').classList.add('visible');
+            document.getElementById('loading-progress').textContent = `Running ${numSims.toLocaleString()} simulations...`;
+
+            try {
+                const response = await fetch('/api/draft/simulate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        roster: myRoster.map(p => ({
+                            player_id: p.player_id,
+                            player_name: p.player_name,
+                            position: p.position,
+                            position_type: p.position_type,
+                            stats_type: p.stats_type
+                        })),
+                        num_simulations: numSims,
+                        method: method,
+                        platform: platform
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    displayResults(data.results);
+                } else {
+                    alert('Simulation error: ' + data.error);
+                }
+            } catch (err) {
+                console.error('Error:', err);
+                alert('Failed to run simulation');
+            } finally {
+                document.getElementById('loading-overlay').classList.remove('visible');
+            }
+        }
+
+        function displayResults(results) {
+            // Show results section
+            document.getElementById('results-section').classList.add('visible');
+
+            // Update subtitle
+            document.getElementById('results-subtitle').textContent =
+                `${results.num_simulations.toLocaleString()} simulations • ${results.roster_size} players • ${results.weeks_in_season} weeks`;
+
+            // Update summary stats
+            document.getElementById('result-mean').textContent = results.mean_season_points.toFixed(0);
+            document.getElementById('result-median').textContent = results.median_season_points.toFixed(0);
+            document.getElementById('result-weekly').textContent = results.avg_weekly_points.toFixed(1);
+            document.getElementById('result-max').textContent = results.max_season_points.toFixed(0);
+            document.getElementById('result-min').textContent = results.min_season_points.toFixed(0);
+
+            // Update percentiles
+            document.getElementById('pct-10').textContent = results.percentile_10.toFixed(0);
+            document.getElementById('pct-25').textContent = results.percentile_25.toFixed(0);
+            document.getElementById('pct-50').textContent = results.percentile_50.toFixed(0);
+            document.getElementById('pct-75').textContent = results.percentile_75.toFixed(0);
+            document.getElementById('pct-90').textContent = results.percentile_90.toFixed(0);
+            document.getElementById('pct-95').textContent = results.percentile_95.toFixed(0);
+            document.getElementById('pct-99').textContent = results.percentile_99.toFixed(0);
+
+            // Create charts
+            createHistogramChart(results.histogram.values);
+            createCDFChart(results.histogram.values);
+
+            // Scroll to results
+            document.getElementById('results-section').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function createHistogramChart(values) {
+            const ctx = document.getElementById('histogram-chart').getContext('2d');
+
+            // Destroy existing chart
+            if (histogramChart) histogramChart.destroy();
+
+            // Create histogram bins
+            const min = Math.min(...values);
+            const max = Math.max(...values);
+            const binCount = 30;
+            const binWidth = (max - min) / binCount;
+            const bins = Array(binCount).fill(0);
+            const binLabels = [];
+
+            for (let i = 0; i < binCount; i++) {
+                binLabels.push(Math.round(min + i * binWidth));
+            }
+
+            values.forEach(v => {
+                const binIndex = Math.min(Math.floor((v - min) / binWidth), binCount - 1);
+                bins[binIndex]++;
+            });
+
+            histogramChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: binLabels,
+                    datasets: [{
+                        label: 'Frequency',
+                        data: bins,
+                        backgroundColor: 'rgba(4, 30, 66, 0.7)',
+                        borderColor: 'rgba(4, 30, 66, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            title: { display: true, text: 'Season Points' }
+                        },
+                        y: {
+                            title: { display: true, text: 'Count' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function createCDFChart(values) {
+            const ctx = document.getElementById('cdf-chart').getContext('2d');
+
+            // Destroy existing chart
+            if (cdfChart) cdfChart.destroy();
+
+            // Sort values and create CDF
+            const sorted = [...values].sort((a, b) => a - b);
+            const n = sorted.length;
+
+            // Sample points for smoother curve
+            const sampleSize = Math.min(100, n);
+            const step = Math.floor(n / sampleSize);
+            const labels = [];
+            const cdfData = [];
+
+            for (let i = 0; i < n; i += step) {
+                labels.push(Math.round(sorted[i]));
+                cdfData.push(((i + 1) / n * 100).toFixed(1));
+            }
+
+            cdfChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Cumulative %',
+                        data: cdfData,
+                        borderColor: 'rgba(200, 16, 46, 1)',
+                        backgroundColor: 'rgba(200, 16, 46, 0.1)',
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            title: { display: true, text: 'Season Points' }
+                        },
+                        y: {
+                            title: { display: true, text: 'Percentile' },
+                            min: 0,
+                            max: 100
+                        }
+                    }
+                }
+            });
+        }
+    </script>
+</body>
+</html>
