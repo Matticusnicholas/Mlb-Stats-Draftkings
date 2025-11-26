@@ -84,6 +84,37 @@ def precalculate_all_players():
     stats = db.get_database_stats()
     logger.info(f"Database stats: {stats['total_players']} players, {stats['total_games']} games")
 
+    # Pre-load all player positions and game counts for fast lookup
+    logger.info("Loading player positions and game counts...")
+    session = db.get_session()
+    from src.database.models import PlayerGame
+    from sqlalchemy import func
+    from collections import defaultdict
+
+    position_counts = defaultdict(lambda: defaultdict(int))
+    game_counts = defaultdict(lambda: defaultdict(int))  # {player_id: {stats_type: count}}
+
+    for row in session.query(PlayerGame.player_id, PlayerGame.position, PlayerGame.stats_type).all():
+        if row.position:
+            position_counts[row.player_id][row.position] += 1
+        game_counts[row.player_id][row.stats_type] += 1
+
+    def get_primary_position(player_id, stats_type):
+        """Get most common position for a player."""
+        if stats_type == 'pitching':
+            return 'P'
+        counts = position_counts.get(player_id, {})
+        if not counts:
+            return 'UTIL'
+        return max(counts, key=counts.get)
+
+    def get_games_played(player_id, stats_type):
+        """Get games played for a player."""
+        return game_counts.get(player_id, {}).get(stats_type, 0)
+
+    session.close()
+    logger.info(f"Loaded positions for {len(position_counts)} players, game counts for {len(game_counts)} players")
+
     # Process batting players
     logger.info("\n" + "="*60)
     logger.info("Processing BATTING players...")
@@ -97,6 +128,12 @@ def precalculate_all_players():
     )
 
     logger.info(f"\nCompleted batting analysis: {len(batting_players)} players")
+
+    # Add positions and games_played to batting players
+    logger.info("Adding positions and games_played to batting players...")
+    for player in batting_players:
+        player['position'] = get_primary_position(player['player_id'], 'batting')
+        player['games_played'] = get_games_played(player['player_id'], 'batting')
 
     # Add chart data for instant profile loading
     logger.info("\nAdding chart data to batting players...")
@@ -127,6 +164,12 @@ def precalculate_all_players():
 
     logger.info(f"\nCompleted pitching analysis: {len(pitching_players)} players")
 
+    # Add positions and games_played to pitching players
+    logger.info("Adding positions and games_played to pitching players...")
+    for player in pitching_players:
+        player['position'] = 'P'
+        player['games_played'] = get_games_played(player['player_id'], 'pitching')
+
     # Add chart data for instant profile loading
     logger.info("\nAdding chart data to pitching players...")
     pitching_players = add_chart_data_to_players(pitching_players, weekly_analyzer, 'pitching')
@@ -154,6 +197,16 @@ def precalculate_all_players():
     )
 
     logger.info(f"\nCompleted combined analysis: {len(combined_players)} total players")
+
+    # Add positions and games_played to combined players
+    logger.info("Adding positions and games_played to combined players...")
+    for player in combined_players:
+        stats_type = player.get('player_type', 'batting')
+        if stats_type == 'pitching':
+            player['position'] = 'P'
+        else:
+            player['position'] = get_primary_position(player['player_id'], 'batting')
+        player['games_played'] = get_games_played(player['player_id'], stats_type)
 
     # Add chart data for combined players (need to handle both batting and pitching)
     logger.info("\nAdding chart data to combined players...")
