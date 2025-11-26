@@ -611,8 +611,9 @@ class DraftSimulator:
                 for batter in batters:
                     if batter.get('games_played', 0) < min_games:
                         continue
-                    player_id = batter['player_id']
-                    pos, pos_type = self.get_player_primary_position(player_id)
+                    # Use position from cache, derive position_type without DB query
+                    pos = batter.get('position', 'UTIL')
+                    pos_type = self.get_position_type(pos)
                     batter['position'] = pos
                     batter['position_type'] = pos_type.value
                     batter['stats_type'] = 'batting'
