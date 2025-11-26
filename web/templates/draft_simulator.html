@@ -711,18 +711,27 @@
             document.getElementById('pool-tbody').innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px;"><div class="spinner"></div>Loading players...</td></tr>';
 
             try {
+                console.log('Fetching players...', {platform, minGames});
                 const response = await fetch(`/api/draft/players?scoring_system=${platform}&min_games=${minGames}&limit=400`);
                 const data = await response.json();
 
+                console.log('API Response:', data);
+                console.log('Debug info:', data.debug);
+
                 if (data.success) {
-                    playerPool = data.players;
+                    playerPool = data.players || [];
+                    console.log('Player pool size:', playerPool.length);
+                    if (playerPool.length > 0) {
+                        console.log('First player:', playerPool[0]);
+                    }
                     renderPlayerPool();
                 } else {
+                    console.error('API Error:', data.error);
                     alert('Error loading players: ' + data.error);
                 }
             } catch (err) {
-                console.error('Error:', err);
-                alert('Failed to load player pool');
+                console.error('Fetch Error:', err);
+                alert('Failed to load player pool: ' + err.message);
             }
         }
 
