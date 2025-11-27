@@ -114,7 +114,7 @@ def precalculate_all_players():
             return 'P'
         counts = position_counts.get(player_id, {})
         if not counts:
-            return 'UTIL'
+            return 'OF'  # Default to OF (DraftKings has no UTIL)
 
         primary = max(counts, key=counts.get)
 
@@ -139,8 +139,8 @@ def precalculate_all_players():
                 return max(if_counts, key=if_counts.get)
             return '1B'  # Default IF position
         else:
-            # Pure DH with no field positions - default to UTIL
-            return 'UTIL'
+            # Pure DH with no field positions - default to OF (DraftKings has no UTIL)
+            return 'OF'
 
     def get_games_played(player_id, stats_type):
         """Get games played for a player."""
