@@ -51,8 +51,11 @@ POSITION_CLASSIFICATION = {
     'P': PositionType.PITCHER,
     'SP': PositionType.PITCHER,
     'RP': PositionType.PITCHER,
-    # Designated hitter
+    # Designated hitter / Utility
     'DH': PositionType.UTILITY,
+    'UTIL': PositionType.UTILITY,
+    # Pinch hitter (shouldn't appear but handle it)
+    'PH': PositionType.UTILITY,
 }
 
 
