@@ -5,8 +5,8 @@ Simulates a full season for a drafted roster using historical performance distri
 models week-by-week performance, and calculates optimal best ball lineups.
 
 Supports multiple platforms:
-- DraftKings: 3 OF, 3 IF (C/1B/2B/3B/SS), 3 P, 1 UTIL
-- Underdog/Drafters: Infield/Outfield flex positions
+- DraftKings: 2P, 1C, 1-1B, 1-2B, 1-3B, 1-SS, 3OF (10 starters, NO UTIL)
+- Underdog/Drafters: 3P, 3IF, 3OF, 1UTIL (10 starters)
 """
 import numpy as np
 import pandas as pd
@@ -90,9 +90,11 @@ ROSTER_CONFIGS = {
             RosterSlot('IF', 3, [PositionType.INFIELD, PositionType.CATCHER],
                       ['C', '1B', '2B', '3B', 'SS']),
             RosterSlot('OF', 3, [PositionType.OUTFIELD], ['OF', 'LF', 'CF', 'RF']),
+            RosterSlot('UTIL', 1, [PositionType.INFIELD, PositionType.OUTFIELD, PositionType.CATCHER],
+                      ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'OF']),
         ],
         'roster_size': 20,
-        'weekly_starters': 9,
+        'weekly_starters': 10,
         'description': 'Underdog Best Ball'
     },
     'drafters': {
@@ -101,9 +103,11 @@ ROSTER_CONFIGS = {
             RosterSlot('IF', 3, [PositionType.INFIELD, PositionType.CATCHER],
                       ['C', '1B', '2B', '3B', 'SS']),
             RosterSlot('OF', 3, [PositionType.OUTFIELD], ['OF', 'LF', 'CF', 'RF']),
+            RosterSlot('UTIL', 1, [PositionType.INFIELD, PositionType.OUTFIELD, PositionType.CATCHER],
+                      ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'OF']),
         ],
         'roster_size': 20,
-        'weekly_starters': 9,
+        'weekly_starters': 10,
         'description': 'Drafters Best Ball'
     }
 }
