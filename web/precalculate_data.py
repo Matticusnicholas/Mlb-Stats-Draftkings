@@ -99,14 +99,48 @@ def precalculate_all_players():
             position_counts[row.player_id][row.position] += 1
         game_counts[row.player_id][row.stats_type] += 1
 
+    # Define position categories for best ball (no DH/PH in best ball)
+    IF_POSITIONS = {'C', '1B', '2B', '3B', 'SS'}
+    OF_POSITIONS = {'LF', 'CF', 'RF'}
+
     def get_primary_position(player_id, stats_type):
-        """Get most common position for a player."""
+        """Get best ball position for a player.
+
+        For best ball, DH and PH don't exist - players must be assigned to
+        a real position. If their primary position is DH/PH, we look at their
+        other positions and assign IF or OF based on where they played more.
+        """
         if stats_type == 'pitching':
             return 'P'
         counts = position_counts.get(player_id, {})
         if not counts:
             return 'UTIL'
-        return max(counts, key=counts.get)
+
+        primary = max(counts, key=counts.get)
+
+        # If primary position is a real position (not DH/PH), use it
+        if primary in IF_POSITIONS or primary in OF_POSITIONS:
+            return primary
+
+        # For DH/PH players, determine IF vs OF based on other positions
+        if_games = sum(counts.get(pos, 0) for pos in IF_POSITIONS)
+        of_games = sum(counts.get(pos, 0) for pos in OF_POSITIONS)
+
+        if of_games > if_games:
+            # Return most common OF position
+            of_counts = {pos: counts.get(pos, 0) for pos in OF_POSITIONS if counts.get(pos, 0) > 0}
+            if of_counts:
+                return max(of_counts, key=of_counts.get)
+            return 'OF'  # Generic OF if no specific position
+        elif if_games > 0:
+            # Return most common IF position
+            if_counts = {pos: counts.get(pos, 0) for pos in IF_POSITIONS if counts.get(pos, 0) > 0}
+            if if_counts:
+                return max(if_counts, key=if_counts.get)
+            return '1B'  # Default IF position
+        else:
+            # Pure DH with no field positions - default to UTIL
+            return 'UTIL'
 
     def get_games_played(player_id, stats_type):
         """Get games played for a player."""
