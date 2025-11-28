@@ -81,27 +81,28 @@ class MockDraftEngine:
     NUM_TEAMS = 12
     NUM_ROUNDS = 20
 
-    # Position targets for different archetypes
+    # Position targets for different archetypes (established metas)
+    # Most drafters take 5-7 pitchers for depth/streaming options
     ARCHETYPE_TARGETS = {
-        DraftArchetype.ADP_ANDY: {'IF': 8, 'OF': 8, 'P': 4},
-        DraftArchetype.STARS_AND_SCRUBS: {'IF': 8, 'OF': 7, 'P': 5},
-        DraftArchetype.ZERO_PITCHER: {'IF': 8, 'OF': 8, 'P': 4},
-        DraftArchetype.ACE_HUNTER: {'IF': 7, 'OF': 7, 'P': 6},
-        DraftArchetype.POSITION_SCARCITY: {'IF': 9, 'OF': 7, 'P': 4},
-        DraftArchetype.CONTRARIAN: {'IF': 8, 'OF': 8, 'P': 4},
-        DraftArchetype.BALANCED: {'IF': 8, 'OF': 8, 'P': 4},
-        DraftArchetype.USER: {'IF': 8, 'OF': 8, 'P': 4},
+        DraftArchetype.ADP_ANDY: {'IF': 7, 'OF': 7, 'P': 6},      # Standard balanced build
+        DraftArchetype.STARS_AND_SCRUBS: {'IF': 7, 'OF': 7, 'P': 6},  # Premium early + value late
+        DraftArchetype.ZERO_PITCHER: {'IF': 7, 'OF': 6, 'P': 7},  # Wait on P, but still get depth
+        DraftArchetype.ACE_HUNTER: {'IF': 6, 'OF': 6, 'P': 8},    # Heavy pitcher investment
+        DraftArchetype.POSITION_SCARCITY: {'IF': 8, 'OF': 6, 'P': 6},  # Prioritize scarce positions
+        DraftArchetype.CONTRARIAN: {'IF': 7, 'OF': 7, 'P': 6},    # Fade popular, find value
+        DraftArchetype.BALANCED: {'IF': 7, 'OF': 7, 'P': 6},      # Even distribution
+        DraftArchetype.USER: {'IF': 7, 'OF': 7, 'P': 6},          # Default for user
     }
 
     # Round preferences for archetypes (which rounds to take pitchers)
     PITCHER_ROUND_PREFS = {
-        DraftArchetype.ADP_ANDY: list(range(1, 21)),  # Any round per ADP
-        DraftArchetype.STARS_AND_SCRUBS: [1, 2, 17, 18, 19, 20],  # Early stars or late scrubs
-        DraftArchetype.ZERO_PITCHER: [17, 18, 19, 20],  # Only late rounds
-        DraftArchetype.ACE_HUNTER: [3, 4, 5, 6, 7, 8],  # Mid-early rounds
-        DraftArchetype.POSITION_SCARCITY: list(range(10, 21)),  # Later rounds
-        DraftArchetype.CONTRARIAN: list(range(8, 21)),  # Mid-late
-        DraftArchetype.BALANCED: list(range(5, 21)),  # After round 4
+        DraftArchetype.ADP_ANDY: list(range(1, 21)),  # Follows ADP strictly
+        DraftArchetype.STARS_AND_SCRUBS: list(range(3, 21)),  # Bats first 2 rounds, then mix
+        DraftArchetype.ZERO_PITCHER: list(range(10, 21)),  # Wait until round 10+
+        DraftArchetype.ACE_HUNTER: [2, 3, 4, 5, 6, 7, 8, 9, 10],  # Early-mid pitcher focus
+        DraftArchetype.POSITION_SCARCITY: list(range(8, 21)),  # Later pitchers
+        DraftArchetype.CONTRARIAN: list(range(6, 21)),  # Mid-late, avoid early run
+        DraftArchetype.BALANCED: list(range(4, 21)),  # Spread throughout
     }
 
     def __init__(self, user_position: int = 1):
@@ -305,41 +306,60 @@ class MockDraftEngine:
                 # Take best available at that position
                 return min(pos_candidates, key=lambda x: x.rank)
 
+        # Get pitcher round preferences for this archetype
+        pitcher_rounds = self.PITCHER_ROUND_PREFS.get(archetype, list(range(1, 21)))
+
         # Archetype-specific logic
         if archetype == DraftArchetype.ZERO_PITCHER:
-            # Only take pitchers in rounds 17-20
-            if self.current_round < 17:
+            # Wait on pitchers until round 10+
+            if self.current_round < 10:
                 candidates = [c for c in candidates if c.position != 'P']
-            elif needs['P'] > 0:
+            elif needs['P'] > 0 and self.current_round >= 10:
+                # Start mixing in pitchers after round 10
                 pitcher_candidates = [c for c in candidates if c.position == 'P']
-                if pitcher_candidates:
+                if pitcher_candidates and random.random() < 0.5:
                     candidates = pitcher_candidates
 
         elif archetype == DraftArchetype.ACE_HUNTER:
-            # Target elite pitchers in rounds 3-8
-            if 3 <= self.current_round <= 8 and needs['P'] > 0:
-                pitcher_candidates = [c for c in candidates if c.position == 'P']
-                if pitcher_candidates:
-                    candidates = pitcher_candidates
+            # Heavy pitcher investment - willing to reach for elite arms
+            if self.current_round in pitcher_rounds and needs['P'] > 0:
+                # Get ALL available pitchers, not just those in ADP window
+                all_pitchers = [p for p in self.available_players if p.position == 'P']
+                if all_pitchers and random.random() < 0.75:
+                    # Take best available pitcher even if reaching
+                    return min(all_pitchers, key=lambda x: x.rank)
 
         elif archetype == DraftArchetype.POSITION_SCARCITY:
-            # Prioritize IF early
-            if self.current_round <= 8 and needs['IF'] > 4:
+            # Prioritize IF/C early for scarce positions
+            if self.current_round <= 10 and needs['IF'] > 2:
                 if_candidates = [c for c in candidates if c.position == 'IF']
                 if if_candidates:
                     candidates = if_candidates
 
         elif archetype == DraftArchetype.STARS_AND_SCRUBS:
-            if self.current_round <= 6:
+            # Pay up for premium players early
+            if self.current_round <= 4:
                 candidates = sorted(candidates, key=lambda x: x.rank)[:5]
+            # Take pitchers in rounds 4-8 (willing to reach for aces)
+            if 4 <= self.current_round <= 10 and needs['P'] > 0:
+                all_pitchers = [p for p in self.available_players if p.position == 'P']
+                if all_pitchers and random.random() < 0.35:
+                    return min(all_pitchers, key=lambda x: x.rank)
 
         elif archetype in [DraftArchetype.ADP_ANDY, DraftArchetype.BALANCED]:
-            # Spread out pitcher picks - roughly 1 per 5 rounds
-            pitcher_round_targets = [4, 8, 12, 16]  # Rounds to consider pitchers
+            # Spread pitcher picks throughout draft - willing to reach a bit
+            pitcher_round_targets = [3, 6, 9, 12, 15, 18]
             if self.current_round in pitcher_round_targets and needs['P'] > 0:
-                pitcher_candidates = [c for c in candidates if c.position == 'P']
-                if pitcher_candidates and random.random() < 0.7:  # 70% chance to take pitcher
-                    candidates = pitcher_candidates
+                all_pitchers = [p for p in self.available_players if p.position == 'P']
+                if all_pitchers and random.random() < 0.55:
+                    return min(all_pitchers, key=lambda x: x.rank)
+
+        elif archetype == DraftArchetype.CONTRARIAN:
+            # Fade popular picks, take pitchers mid-draft when others go bats
+            if 5 <= self.current_round <= 12 and needs['P'] > 0:
+                all_pitchers = [p for p in self.available_players if p.position == 'P']
+                if all_pitchers and random.random() < 0.45:
+                    return min(all_pitchers, key=lambda x: x.rank)
 
         # Filter out positions we don't need
         if needs['P'] == 0:
