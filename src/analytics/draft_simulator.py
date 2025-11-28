@@ -5,8 +5,8 @@ Simulates a full season for a drafted roster using historical performance distri
 models week-by-week performance, and calculates optimal best ball lineups.
 
 Supports multiple platforms:
-- DraftKings: 3 OF, 3 IF (C/1B/2B/3B/SS), 3 P, 1 UTIL
-- Underdog/Drafters: Infield/Outfield flex positions
+- DraftKings: 2P, 1C, 1-1B, 1-2B, 1-3B, 1-SS, 3OF (10 starters, NO UTIL)
+- Underdog/Drafters: 3P, 3IF, 3OF, 1UTIL (10 starters)
 """
 import numpy as np
 import pandas as pd
@@ -90,9 +90,11 @@ ROSTER_CONFIGS = {
             RosterSlot('IF', 3, [PositionType.INFIELD, PositionType.CATCHER],
                       ['C', '1B', '2B', '3B', 'SS']),
             RosterSlot('OF', 3, [PositionType.OUTFIELD], ['OF', 'LF', 'CF', 'RF']),
+            RosterSlot('UTIL', 1, [PositionType.INFIELD, PositionType.OUTFIELD, PositionType.CATCHER],
+                      ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'OF']),
         ],
         'roster_size': 20,
-        'weekly_starters': 9,
+        'weekly_starters': 10,
         'description': 'Underdog Best Ball'
     },
     'drafters': {
@@ -101,9 +103,11 @@ ROSTER_CONFIGS = {
             RosterSlot('IF', 3, [PositionType.INFIELD, PositionType.CATCHER],
                       ['C', '1B', '2B', '3B', 'SS']),
             RosterSlot('OF', 3, [PositionType.OUTFIELD], ['OF', 'LF', 'CF', 'RF']),
+            RosterSlot('UTIL', 1, [PositionType.INFIELD, PositionType.OUTFIELD, PositionType.CATCHER],
+                      ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'OF']),
         ],
         'roster_size': 20,
-        'weekly_starters': 9,
+        'weekly_starters': 10,
         'description': 'Drafters Best Ball'
     }
 }
@@ -509,10 +513,25 @@ class DraftSimulator:
 
         season_totals = []
         all_simulations = []
+        all_weekly_scores = []  # Flattened list of all weekly scores
+        sample_weekly = None  # Store one sample simulation's weekly breakdown
+        best_week = 0  # Track best single week across all simulations
 
         for sim_num in range(self.num_simulations):
             season = self.simulate_season(roster, method)
             season_totals.append(season.total_points)
+
+            # Collect weekly scores for histograms
+            all_weekly_scores.extend(season.weekly_totals)
+
+            # Track best single week
+            week_max = max(season.weekly_totals) if season.weekly_totals else 0
+            if week_max > best_week:
+                best_week = week_max
+
+            # Store first simulation's weekly breakdown as sample
+            if sample_weekly is None:
+                sample_weekly = season.weekly_totals.copy()
 
             if return_all_simulations:
                 all_simulations.append({
@@ -525,6 +544,7 @@ class DraftSimulator:
                 logger.debug(f"Completed simulation {sim_num + 1}/{self.num_simulations}")
 
         season_totals = np.array(season_totals)
+        all_weekly_scores = np.array(all_weekly_scores)
 
         # Calculate percentile outcomes
         results = {
@@ -533,14 +553,20 @@ class DraftSimulator:
             'weeks_in_season': self.weeks_in_season,
             'scoring_system': self.scoring_system,
 
-            # Distribution stats
+            # Distribution stats (with UI-friendly aliases)
             'mean_season_points': float(np.mean(season_totals)),
             'median_season_points': float(np.median(season_totals)),
             'std_season_points': float(np.std(season_totals)),
             'min_season_points': float(np.min(season_totals)),
             'max_season_points': float(np.max(season_totals)),
 
-            # Percentile outcomes
+            # UI-friendly aliases
+            'mean_season': float(np.mean(season_totals)),
+            'median_season': float(np.median(season_totals)),
+            'ceiling': float(np.percentile(season_totals, 99)),
+            'floor': float(np.percentile(season_totals, 1)),
+
+            # Percentile outcomes (legacy format)
             'percentile_10': float(np.percentile(season_totals, 10)),
             'percentile_25': float(np.percentile(season_totals, 25)),
             'percentile_50': float(np.percentile(season_totals, 50)),
@@ -549,10 +575,33 @@ class DraftSimulator:
             'percentile_95': float(np.percentile(season_totals, 95)),
             'percentile_99': float(np.percentile(season_totals, 99)),
 
+            # Percentiles in UI-friendly object format
+            'percentiles': {
+                'p1': float(np.percentile(season_totals, 1)),
+                'p10': float(np.percentile(season_totals, 10)),
+                'p25': float(np.percentile(season_totals, 25)),
+                'p50': float(np.percentile(season_totals, 50)),
+                'p75': float(np.percentile(season_totals, 75)),
+                'p90': float(np.percentile(season_totals, 90)),
+                'p99': float(np.percentile(season_totals, 99)),
+            },
+
             # Weekly averages
             'avg_weekly_points': float(np.mean(season_totals) / self.weeks_in_season),
 
-            # Histogram data for visualization
+            # Best week stats
+            'best_week': float(best_week),
+            'weekly_avg': float(np.mean(all_weekly_scores)) if len(all_weekly_scores) > 0 else 0,
+            'weekly_std': float(np.std(all_weekly_scores)) if len(all_weekly_scores) > 0 else 0,
+            'weekly_min': float(np.min(all_weekly_scores)) if len(all_weekly_scores) > 0 else 0,
+            'weekly_max': float(np.max(all_weekly_scores)) if len(all_weekly_scores) > 0 else 0,
+
+            # Raw data for histograms and charts
+            'all_seasons': season_totals.tolist(),
+            'all_weekly_scores': all_weekly_scores.tolist(),
+            'sample_weekly': sample_weekly or [],
+
+            # Histogram data for visualization (legacy format)
             'histogram': {
                 'values': season_totals.tolist(),
                 'bins': 30

@@ -591,6 +591,7 @@ def run_draft_simulation():
         num_simulations: Number of simulations (100-10000)
         method: 'bootstrap' or 'parametric'
         platform: Scoring platform
+        weeks: Number of weeks to simulate (default: 26)
     """
     try:
         data = request.get_json()
@@ -599,6 +600,7 @@ def run_draft_simulation():
         num_simulations = min(int(data.get('num_simulations', 500)), 10000)
         method = data.get('method', 'bootstrap')
         platform = data.get('platform', 'draftkings')
+        weeks = int(data.get('weeks', 26))
 
         if len(roster) < 5:
             return jsonify({
@@ -610,7 +612,8 @@ def run_draft_simulation():
         simulator = DraftSimulator(
             db,
             scoring_system=platform,
-            num_simulations=num_simulations
+            num_simulations=num_simulations,
+            weeks_in_season=weeks
         )
 
         # Run simulation
@@ -658,6 +661,232 @@ def validate_roster():
             'success': False,
             'error': str(e)
         }), 500
+
+
+# =============================================================================
+# MOCK DRAFT ROUTES
+# =============================================================================
+
+# Store active mock drafts in memory (in production, use Redis or similar)
+_active_drafts = {}
+
+
+@app.route('/mock-draft')
+def mock_draft_page():
+    """Render mock draft simulator page."""
+    return render_template('mock_draft.html')
+
+
+@app.route('/api/mock-draft/start', methods=['POST'])
+def start_mock_draft():
+    """
+    Start a new mock draft.
+
+    POST body:
+        user_position: Draft position (1-12)
+    """
+    try:
+        from src.analytics.mock_draft import MockDraftEngine
+
+        data = request.get_json() or {}
+        user_position = data.get('user_position', 1)
+
+        if not 1 <= user_position <= 12:
+            return jsonify({'success': False, 'error': 'Position must be 1-12'}), 400
+
+        # Create new draft
+        draft_id = f"draft_{datetime.now().strftime('%Y%m%d%H%M%S')}_{user_position}"
+        engine = MockDraftEngine(user_position=user_position)
+
+        _active_drafts[draft_id] = engine
+
+        # Simulate until user's first pick
+        picks_made = engine.simulate_until_user_pick()
+
+        return jsonify({
+            'success': True,
+            'draft_id': draft_id,
+            'state': engine.get_draft_state(),
+            'picks_made': [
+                {
+                    'round': p.round_num,
+                    'pick': p.pick_num,
+                    'overall': p.overall_pick,
+                    'team_id': p.team_id,
+                    'player': p.player_name,
+                    'position': p.position,
+                    'adp': p.adp_rank
+                }
+                for p in picks_made
+            ]
+        })
+
+    except Exception as e:
+        logger.error(f"Error starting mock draft: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/mock-draft/<draft_id>/pick', methods=['POST'])
+def make_mock_draft_pick(draft_id):
+    """
+    Make a pick in an active mock draft.
+
+    POST body:
+        player_id: Database player ID to draft
+    """
+    try:
+        if draft_id not in _active_drafts:
+            return jsonify({'success': False, 'error': 'Draft not found'}), 404
+
+        engine = _active_drafts[draft_id]
+        data = request.get_json()
+        player_id = data.get('player_id')
+
+        if not player_id:
+            return jsonify({'success': False, 'error': 'player_id required'}), 400
+
+        # Make user's pick
+        user_pick = engine.user_make_pick(player_id)
+
+        if not user_pick:
+            return jsonify({'success': False, 'error': 'Not your turn'}), 400
+
+        # Simulate until next user pick
+        ai_picks = engine.simulate_until_user_pick()
+
+        return jsonify({
+            'success': True,
+            'user_pick': {
+                'round': user_pick.round_num,
+                'pick': user_pick.pick_num,
+                'overall': user_pick.overall_pick,
+                'player': user_pick.player_name,
+                'position': user_pick.position,
+                'adp': user_pick.adp_rank
+            },
+            'ai_picks': [
+                {
+                    'round': p.round_num,
+                    'pick': p.pick_num,
+                    'overall': p.overall_pick,
+                    'team_id': p.team_id,
+                    'player': p.player_name,
+                    'position': p.position,
+                    'adp': p.adp_rank
+                }
+                for p in ai_picks
+            ],
+            'state': engine.get_draft_state()
+        })
+
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        logger.error(f"Error making pick: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/mock-draft/<draft_id>/state')
+def get_mock_draft_state(draft_id):
+    """Get current state of a mock draft."""
+    if draft_id not in _active_drafts:
+        return jsonify({'success': False, 'error': 'Draft not found'}), 404
+
+    engine = _active_drafts[draft_id]
+    return jsonify({
+        'success': True,
+        'state': engine.get_draft_state()
+    })
+
+
+@app.route('/api/mock-draft/<draft_id>/available')
+def get_available_players(draft_id):
+    """Get available players in mock draft."""
+    if draft_id not in _active_drafts:
+        return jsonify({'success': False, 'error': 'Draft not found'}), 404
+
+    engine = _active_drafts[draft_id]
+
+    # Get query params for filtering
+    position = request.args.get('position')
+    limit = int(request.args.get('limit', 50))
+
+    players = engine.available_players
+    if position:
+        players = [p for p in players if p.position == position]
+
+    return jsonify({
+        'success': True,
+        'players': [
+            {
+                'player_id': p.db_player_id,
+                'player_name': p.player_name,
+                'position': p.position,
+                'team': p.team,
+                'adp_rank': p.rank
+            }
+            for p in players[:limit]
+        ]
+    })
+
+
+@app.route('/api/mock-draft/<draft_id>/roster')
+def get_user_roster(draft_id):
+    """Get user's roster in mock draft."""
+    if draft_id not in _active_drafts:
+        return jsonify({'success': False, 'error': 'Draft not found'}), 404
+
+    engine = _active_drafts[draft_id]
+    roster = engine.get_user_roster()
+
+    return jsonify({
+        'success': True,
+        'roster': [
+            {
+                'round': p.round_num,
+                'pick': p.pick_num,
+                'player_id': p.player_id,
+                'player_name': p.player_name,
+                'position': p.position,
+                'adp_rank': p.adp_rank
+            }
+            for p in roster
+        ]
+    })
+
+
+@app.route('/api/mock-draft/<draft_id>/all-rosters')
+def get_all_rosters(draft_id):
+    """Get all teams' rosters for completed draft."""
+    if draft_id not in _active_drafts:
+        return jsonify({'success': False, 'error': 'Draft not found'}), 404
+
+    engine = _active_drafts[draft_id]
+
+    rosters = {}
+    for team in engine.teams:
+        rosters[team.team_id] = {
+            'name': team.name,
+            'archetype': team.archetype.value,
+            'roster': [
+                {
+                    'round': p.round_num,
+                    'player_name': p.player_name,
+                    'position': p.position,
+                    'adp_rank': p.adp_rank
+                }
+                for p in team.roster
+            ]
+        }
+
+    return jsonify({
+        'success': True,
+        'rosters': rosters
+    })
 
 
 if __name__ == '__main__':
