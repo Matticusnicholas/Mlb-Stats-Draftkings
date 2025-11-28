@@ -827,7 +827,9 @@ def get_available_players(draft_id):
                 'player_name': p.player_name,
                 'position': p.position,
                 'team': p.team,
-                'adp_rank': p.rank
+                'adp_rank': p.rank,
+                'ev_rank': p.ev_rank,
+                'bestball_score': round(p.bestball_score, 1)
             }
             for p in players[:limit]
         ]

@@ -71,6 +71,8 @@ class AvailablePlayer:
     position: str
     team: str
     rotowire_id: int = 0
+    ev_rank: int = 0  # Best ball EV rank based on bestball_score
+    bestball_score: float = 0.0  # Raw bestball score for reference
 
 
 class MockDraftEngine:
@@ -123,11 +125,45 @@ class MockDraftEngine:
         self._setup_teams()
 
     def _load_rankings(self):
-        """Load ADP rankings from file."""
+        """Load ADP rankings from file and merge with bestball EV data."""
         rankings_path = Path(__file__).parent.parent.parent / 'data' / 'adp_rankings_2025.json'
+        cache_dir = Path(__file__).parent.parent.parent / 'web' / 'cache'
 
         with open(rankings_path, 'r') as f:
             data = json.load(f)
+
+        # Load bestball rankings from cache to get EV ranks
+        ev_rankings = {}  # player_id -> (rank, bestball_score)
+
+        # Load batting cache
+        batting_cache = cache_dir / 'batting_players.json'
+        if batting_cache.exists():
+            with open(batting_cache, 'r') as f:
+                batting_data = json.load(f)
+                # Sort by bestball_score to get ranking
+                batters = sorted(
+                    batting_data.get('players', []),
+                    key=lambda x: x.get('bestball_score', 0),
+                    reverse=True
+                )
+                for i, player in enumerate(batters, 1):
+                    ev_rankings[player['player_id']] = (i, player.get('bestball_score', 0))
+
+        # Load pitching cache
+        pitching_cache = cache_dir / 'pitching_players.json'
+        if pitching_cache.exists():
+            with open(pitching_cache, 'r') as f:
+                pitching_data = json.load(f)
+                # Sort by bestball_score to get ranking
+                pitchers = sorted(
+                    pitching_data.get('players', []),
+                    key=lambda x: x.get('bestball_score', 0),
+                    reverse=True
+                )
+                for i, player in enumerate(pitchers, 1):
+                    ev_rankings[player['player_id']] = (i, player.get('bestball_score', 0))
+
+        logger.info(f"Loaded {len(ev_rankings)} players with EV rankings from cache")
 
         self.available_players = [
             AvailablePlayer(
@@ -136,7 +172,9 @@ class MockDraftEngine:
                 player_name=p['player_name'],
                 position=p['position'],
                 team=p['team'],
-                rotowire_id=p.get('rotowire_id', 0)
+                rotowire_id=p.get('rotowire_id', 0),
+                ev_rank=ev_rankings.get(p['db_player_id'], (999, 0))[0],
+                bestball_score=ev_rankings.get(p['db_player_id'], (999, 0))[1]
             )
             for p in data['rankings']
         ]
