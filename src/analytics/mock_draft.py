@@ -460,6 +460,9 @@ class MockDraftEngine:
         """Get current draft state for UI."""
         team = self.get_current_team()
 
+        # Get user's roster (needed for simulation even if viewing another team)
+        user_team = next(t for t in self.teams if t.archetype == DraftArchetype.USER)
+
         return {
             'current_round': self.current_round,
             'current_pick': self.current_pick,
@@ -472,6 +475,7 @@ class MockDraftEngine:
                 'roster': [
                     {
                         'round': p.round_num,
+                        'player_id': p.player_id,
                         'player_name': p.player_name,
                         'position': p.position,
                         'adp': p.adp_rank
@@ -479,6 +483,16 @@ class MockDraftEngine:
                     for p in team.roster
                 ]
             },
+            'user_roster': [
+                {
+                    'round': p.round_num,
+                    'player_id': p.player_id,
+                    'player_name': p.player_name,
+                    'position': p.position,
+                    'adp': p.adp_rank
+                }
+                for p in user_team.roster
+            ],
             'is_complete': self.is_draft_complete(),
             'available_count': len(self.available_players),
             'recent_picks': [

@@ -591,6 +591,7 @@ def run_draft_simulation():
         num_simulations: Number of simulations (100-10000)
         method: 'bootstrap' or 'parametric'
         platform: Scoring platform
+        weeks: Number of weeks to simulate (default: 26)
     """
     try:
         data = request.get_json()
@@ -599,6 +600,7 @@ def run_draft_simulation():
         num_simulations = min(int(data.get('num_simulations', 500)), 10000)
         method = data.get('method', 'bootstrap')
         platform = data.get('platform', 'draftkings')
+        weeks = int(data.get('weeks', 26))
 
         if len(roster) < 5:
             return jsonify({
@@ -610,7 +612,8 @@ def run_draft_simulation():
         simulator = DraftSimulator(
             db,
             scoring_system=platform,
-            num_simulations=num_simulations
+            num_simulations=num_simulations,
+            weeks_in_season=weeks
         )
 
         # Run simulation
