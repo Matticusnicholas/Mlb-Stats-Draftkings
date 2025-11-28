@@ -133,37 +133,34 @@ class MockDraftEngine:
             data = json.load(f)
 
         # Load bestball rankings from cache to get EV ranks
-        ev_rankings = {}  # player_id -> (rank, bestball_score)
+        # Combine ALL players (batters + pitchers) and rank by bestball_score
+        all_players = []  # List of (player_id, bestball_score)
 
         # Load batting cache
         batting_cache = cache_dir / 'batting_players.json'
         if batting_cache.exists():
             with open(batting_cache, 'r') as f:
                 batting_data = json.load(f)
-                # Sort by bestball_score to get ranking
-                batters = sorted(
-                    batting_data.get('players', []),
-                    key=lambda x: x.get('bestball_score', 0),
-                    reverse=True
-                )
-                for i, player in enumerate(batters, 1):
-                    ev_rankings[player['player_id']] = (i, player.get('bestball_score', 0))
+                for player in batting_data.get('players', []):
+                    all_players.append((player['player_id'], player.get('bestball_score', 0)))
 
         # Load pitching cache
         pitching_cache = cache_dir / 'pitching_players.json'
         if pitching_cache.exists():
             with open(pitching_cache, 'r') as f:
                 pitching_data = json.load(f)
-                # Sort by bestball_score to get ranking
-                pitchers = sorted(
-                    pitching_data.get('players', []),
-                    key=lambda x: x.get('bestball_score', 0),
-                    reverse=True
-                )
-                for i, player in enumerate(pitchers, 1):
-                    ev_rankings[player['player_id']] = (i, player.get('bestball_score', 0))
+                for player in pitching_data.get('players', []):
+                    all_players.append((player['player_id'], player.get('bestball_score', 0)))
 
-        logger.info(f"Loaded {len(ev_rankings)} players with EV rankings from cache")
+        # Sort ALL players by bestball_score to get overall EV rank
+        all_players.sort(key=lambda x: x[1], reverse=True)
+
+        # Create mapping: player_id -> (overall_rank, bestball_score)
+        ev_rankings = {}
+        for i, (player_id, score) in enumerate(all_players, 1):
+            ev_rankings[player_id] = (i, score)
+
+        logger.info(f"Loaded {len(ev_rankings)} players with overall EV rankings from cache")
 
         self.available_players = [
             AvailablePlayer(
