@@ -128,39 +128,57 @@ class MockDraftEngine:
         """Load ADP rankings from file and merge with bestball EV data."""
         rankings_path = Path(__file__).parent.parent.parent / 'data' / 'adp_rankings_2025.json'
         cache_dir = Path(__file__).parent.parent.parent / 'web' / 'cache'
+        persistent_rankings = Path(__file__).parent.parent.parent / 'data' / 'bestball_rankings.json'
 
         with open(rankings_path, 'r') as f:
             data = json.load(f)
 
-        # Load bestball rankings from cache to get EV ranks
-        # Combine ALL players (batters + pitchers) and rank by bestball_score
-        all_players = []  # List of (player_id, bestball_score)
+        # Try to load EV rankings from multiple sources:
+        # 1. First try persistent rankings file (committed to repo)
+        # 2. Fall back to cache files
+        ev_rankings = {}  # player_id -> (overall_rank, bestball_score)
 
-        # Load batting cache
-        batting_cache = cache_dir / 'batting_players.json'
-        if batting_cache.exists():
-            with open(batting_cache, 'r') as f:
-                batting_data = json.load(f)
-                for player in batting_data.get('players', []):
-                    all_players.append((player['player_id'], player.get('bestball_score', 0)))
+        if persistent_rankings.exists():
+            # Load from persistent file (preferred - already has ev_rank calculated)
+            logger.info("Loading EV rankings from persistent file...")
+            with open(persistent_rankings, 'r') as f:
+                persistent_data = json.load(f)
+                for player in persistent_data.get('players', []):
+                    ev_rankings[player['player_id']] = (
+                        player.get('ev_rank', 999),
+                        player.get('bestball_score', 0)
+                    )
+            logger.info(f"Loaded {len(ev_rankings)} players with EV rankings from persistent file")
 
-        # Load pitching cache
-        pitching_cache = cache_dir / 'pitching_players.json'
-        if pitching_cache.exists():
-            with open(pitching_cache, 'r') as f:
-                pitching_data = json.load(f)
-                for player in pitching_data.get('players', []):
-                    all_players.append((player['player_id'], player.get('bestball_score', 0)))
+        else:
+            # Fall back to cache files
+            logger.info("Persistent rankings not found, loading from cache...")
+            all_players = []  # List of (player_id, bestball_score)
 
-        # Sort ALL players by bestball_score to get overall EV rank
-        all_players.sort(key=lambda x: x[1], reverse=True)
+            # Load batting cache
+            batting_cache = cache_dir / 'batting_players.json'
+            if batting_cache.exists():
+                with open(batting_cache, 'r') as f:
+                    batting_data = json.load(f)
+                    for player in batting_data.get('players', []):
+                        all_players.append((player['player_id'], player.get('bestball_score', 0)))
 
-        # Create mapping: player_id -> (overall_rank, bestball_score)
-        ev_rankings = {}
-        for i, (player_id, score) in enumerate(all_players, 1):
-            ev_rankings[player_id] = (i, score)
+            # Load pitching cache
+            pitching_cache = cache_dir / 'pitching_players.json'
+            if pitching_cache.exists():
+                with open(pitching_cache, 'r') as f:
+                    pitching_data = json.load(f)
+                    for player in pitching_data.get('players', []):
+                        all_players.append((player['player_id'], player.get('bestball_score', 0)))
 
-        logger.info(f"Loaded {len(ev_rankings)} players with overall EV rankings from cache")
+            # Sort ALL players by bestball_score to get overall EV rank
+            all_players.sort(key=lambda x: x[1], reverse=True)
+
+            # Create mapping: player_id -> (overall_rank, bestball_score)
+            for i, (player_id, score) in enumerate(all_players, 1):
+                ev_rankings[player_id] = (i, score)
+
+            logger.info(f"Loaded {len(ev_rankings)} players with EV rankings from cache")
 
         self.available_players = [
             AvailablePlayer(

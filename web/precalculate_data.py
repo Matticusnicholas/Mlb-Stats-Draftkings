@@ -23,6 +23,10 @@ BATTING_CACHE = os.path.join(CACHE_DIR, 'batting_players.json')
 PITCHING_CACHE = os.path.join(CACHE_DIR, 'pitching_players.json')
 COMBINED_CACHE = os.path.join(CACHE_DIR, 'combined_players.json')
 
+# Persistent rankings file (committed to repo)
+DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
+PERSISTENT_RANKINGS = os.path.join(DATA_DIR, 'bestball_rankings.json')
+
 
 def add_chart_data_to_players(players, analyzer, stats_type):
     """
@@ -314,5 +318,160 @@ def precalculate_all_players():
     logger.info("\nThe web app will now load INSTANTLY from these cache files!")
 
 
+def export_persistent_rankings():
+    """
+    Export rankings to a persistent JSON file in the data/ folder.
+    This file can be committed to the repo so rankings persist across updates.
+    """
+    if not os.path.exists(BATTING_CACHE) or not os.path.exists(PITCHING_CACHE):
+        logger.error("Cache files not found! Run precalculate_all_players() first.")
+        return False
+
+    logger.info("\n" + "="*60)
+    logger.info("EXPORTING PERSISTENT RANKINGS")
+    logger.info("="*60)
+
+    # Load batting cache
+    with open(BATTING_CACHE, 'r') as f:
+        batting_data = json.load(f)
+    batters = batting_data.get('players', [])
+
+    # Load pitching cache
+    with open(PITCHING_CACHE, 'r') as f:
+        pitching_data = json.load(f)
+    pitchers = pitching_data.get('players', [])
+
+    # Combine and rank all players by bestball_score
+    all_players = []
+
+    for player in batters:
+        all_players.append({
+            'player_id': player['player_id'],
+            'player_name': player['player_name'],
+            'position': player.get('position', 'UTIL'),
+            'team': player.get('team', ''),
+            'bestball_score': player.get('bestball_score', 0),
+            'games_played': player.get('games_played', 0),
+            'stats_type': 'batting',
+            # Key metrics for quick reference
+            'useful_points_total': player.get('useful_points_total', 0),
+            'useful_weeks_count': player.get('useful_weeks_count', 0),
+            'best_week': player.get('best_week', 0),
+            'boom_week_rate': player.get('boom_week_rate', 0),
+            'iv_score': player.get('iv_score', 0),
+        })
+
+    for player in pitchers:
+        all_players.append({
+            'player_id': player['player_id'],
+            'player_name': player['player_name'],
+            'position': 'P',
+            'team': player.get('team', ''),
+            'bestball_score': player.get('bestball_score', 0),
+            'games_played': player.get('games_played', 0),
+            'stats_type': 'pitching',
+            # Key metrics for quick reference
+            'useful_points_total': player.get('useful_points_total', 0),
+            'useful_weeks_count': player.get('useful_weeks_count', 0),
+            'best_week': player.get('best_week', 0),
+            'boom_week_rate': player.get('boom_week_rate', 0),
+            'iv_score': player.get('iv_score', 0),
+        })
+
+    # Sort by bestball_score and assign overall rank
+    all_players.sort(key=lambda x: x['bestball_score'], reverse=True)
+    for i, player in enumerate(all_players, 1):
+        player['ev_rank'] = i
+
+    # Save persistent rankings
+    persistent_data = {
+        'generated_at': datetime.now().isoformat(),
+        'total_count': len(all_players),
+        'batting_count': len(batters),
+        'pitching_count': len(pitchers),
+        'description': 'Best Ball EV rankings - commit this file to persist rankings across repo updates',
+        'players': all_players
+    }
+
+    with open(PERSISTENT_RANKINGS, 'w') as f:
+        json.dump(persistent_data, f, indent=2)
+
+    logger.info(f"✓ Exported {len(all_players)} players to {PERSISTENT_RANKINGS}")
+    logger.info(f"  - {len(batters)} batters")
+    logger.info(f"  - {len(pitchers)} pitchers")
+    logger.info(f"\n  This file can be committed to GitHub!")
+    logger.info(f"  Run: git add data/bestball_rankings.json && git commit -m 'Update bestball rankings'")
+
+    return True
+
+
+def restore_from_persistent():
+    """
+    Restore cache files from the persistent rankings file.
+    Useful when you clone the repo fresh and want to use existing rankings.
+    """
+    if not os.path.exists(PERSISTENT_RANKINGS):
+        logger.error(f"Persistent rankings file not found: {PERSISTENT_RANKINGS}")
+        logger.error("Run precalculate_all_players() to generate rankings first.")
+        return False
+
+    logger.info("\n" + "="*60)
+    logger.info("RESTORING FROM PERSISTENT RANKINGS")
+    logger.info("="*60)
+
+    # Create cache directory if needed
+    os.makedirs(CACHE_DIR, exist_ok=True)
+
+    # Load persistent rankings
+    with open(PERSISTENT_RANKINGS, 'r') as f:
+        data = json.load(f)
+
+    players = data.get('players', [])
+    batters = [p for p in players if p['stats_type'] == 'batting']
+    pitchers = [p for p in players if p['stats_type'] == 'pitching']
+
+    logger.info(f"Found {len(batters)} batters, {len(pitchers)} pitchers in persistent file")
+
+    # Save batting cache
+    batting_cache_data = {
+        'generated_at': data.get('generated_at', datetime.now().isoformat()),
+        'count': len(batters),
+        'players': batters,
+        'restored_from': 'bestball_rankings.json'
+    }
+    with open(BATTING_CACHE, 'w') as f:
+        json.dump(batting_cache_data, f, indent=2)
+    logger.info(f"✓ Restored {BATTING_CACHE}")
+
+    # Save pitching cache
+    pitching_cache_data = {
+        'generated_at': data.get('generated_at', datetime.now().isoformat()),
+        'count': len(pitchers),
+        'players': pitchers,
+        'restored_from': 'bestball_rankings.json'
+    }
+    with open(PITCHING_CACHE, 'w') as f:
+        json.dump(pitching_cache_data, f, indent=2)
+    logger.info(f"✓ Restored {PITCHING_CACHE}")
+
+    logger.info("\n✓ Cache files restored! Web app should work now.")
+    return True
+
+
 if __name__ == '__main__':
-    precalculate_all_players()
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Pre-calculate Best Ball rankings')
+    parser.add_argument('--restore', action='store_true',
+                       help='Restore cache from persistent rankings file')
+    parser.add_argument('--export-only', action='store_true',
+                       help='Only export to persistent file (cache must exist)')
+    args = parser.parse_args()
+
+    if args.restore:
+        restore_from_persistent()
+    elif args.export_only:
+        export_persistent_rankings()
+    else:
+        precalculate_all_players()
+        export_persistent_rankings()
