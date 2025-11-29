@@ -349,6 +349,18 @@
         .pos-badge.OF { background: #0288d1; }
         .pos-badge.P { background: #d32f2f; }
 
+        .available-player .ev-rank {
+            font-size: 0.7rem;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-right: 8px;
+            font-weight: 600;
+        }
+
+        .ev-rank.value { background: #2e7d32; color: #fff; }
+        .ev-rank.neutral { background: #546e7a; color: #fff; }
+        .ev-rank.fade { background: #c62828; color: #fff; }
+
         /* Draft Complete Screen */
         .draft-complete {
             display: none;
@@ -632,6 +644,12 @@
                     <button class="filter-btn" data-filter="IF">IF</button>
                     <button class="filter-btn" data-filter="OF">OF</button>
                     <button class="filter-btn" data-filter="P">P</button>
+                </div>
+                <div style="display: flex; gap: 8px; padding: 5px 10px; font-size: 0.7rem; background: #0d2137; align-items: center;">
+                    <span style="color: #90caf9;">EV Key:</span>
+                    <span class="ev-rank value" style="font-size: 0.65rem;">Value</span>
+                    <span class="ev-rank neutral" style="font-size: 0.65rem;">Fair</span>
+                    <span class="ev-rank fade" style="font-size: 0.65rem;">Fade</span>
                 </div>
                 <input type="text" class="search-box" id="playerSearch" placeholder="Search players...">
                 <div class="available-list" id="availableList">
@@ -925,14 +943,26 @@
                 );
             }
 
-            list.innerHTML = filtered.slice(0, 100).map(player => `
-                <div class="available-player" onclick="makePick(${player.player_id})">
-                    <span class="rank">${player.adp_rank}</span>
-                    <span class="name">${player.player_name}</span>
-                    <span class="team">${player.team}</span>
-                    <span class="pos-badge ${player.position}">${player.position}</span>
-                </div>
-            `).join('');
+            list.innerHTML = filtered.slice(0, 100).map(player => {
+                // Calculate value differential: positive = good value (EV rank < ADP)
+                const valueDiff = player.adp_rank - player.ev_rank;
+                let evClass = 'neutral';
+                if (valueDiff >= 20) evClass = 'value';  // Great value - EV rank much better than ADP
+                else if (valueDiff <= -20) evClass = 'fade';  // Fade - EV rank worse than ADP
+
+                // Show EV rank with indicator
+                const evDisplay = player.ev_rank < 999 ? player.ev_rank : '?';
+
+                return `
+                    <div class="available-player" onclick="makePick(${player.player_id})">
+                        <span class="rank">${player.adp_rank}</span>
+                        <span class="name">${player.player_name}</span>
+                        <span class="ev-rank ${evClass}" title="EV Rank: ${evDisplay} (BB Score: ${player.bestball_score})">EV ${evDisplay}</span>
+                        <span class="team">${player.team}</span>
+                        <span class="pos-badge ${player.position}">${player.position}</span>
+                    </div>
+                `;
+            }).join('');
         }
 
         // Filter buttons

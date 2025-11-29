@@ -71,6 +71,8 @@ class AvailablePlayer:
     position: str
     team: str
     rotowire_id: int = 0
+    ev_rank: int = 0  # Best ball EV rank based on bestball_score
+    bestball_score: float = 0.0  # Raw bestball score for reference
 
 
 class MockDraftEngine:
@@ -123,11 +125,60 @@ class MockDraftEngine:
         self._setup_teams()
 
     def _load_rankings(self):
-        """Load ADP rankings from file."""
+        """Load ADP rankings from file and merge with bestball EV data."""
         rankings_path = Path(__file__).parent.parent.parent / 'data' / 'adp_rankings_2025.json'
+        cache_dir = Path(__file__).parent.parent.parent / 'web' / 'cache'
+        persistent_rankings = Path(__file__).parent.parent.parent / 'data' / 'bestball_rankings.json'
 
         with open(rankings_path, 'r') as f:
             data = json.load(f)
+
+        # Try to load EV rankings from multiple sources:
+        # 1. First try persistent rankings file (committed to repo)
+        # 2. Fall back to cache files
+        ev_rankings = {}  # player_id -> (overall_rank, bestball_score)
+
+        if persistent_rankings.exists():
+            # Load from persistent file (preferred - already has ev_rank calculated)
+            logger.info("Loading EV rankings from persistent file...")
+            with open(persistent_rankings, 'r') as f:
+                persistent_data = json.load(f)
+                for player in persistent_data.get('players', []):
+                    ev_rankings[player['player_id']] = (
+                        player.get('ev_rank', 999),
+                        player.get('bestball_score', 0)
+                    )
+            logger.info(f"Loaded {len(ev_rankings)} players with EV rankings from persistent file")
+
+        else:
+            # Fall back to cache files
+            logger.info("Persistent rankings not found, loading from cache...")
+            all_players = []  # List of (player_id, bestball_score)
+
+            # Load batting cache
+            batting_cache = cache_dir / 'batting_players.json'
+            if batting_cache.exists():
+                with open(batting_cache, 'r') as f:
+                    batting_data = json.load(f)
+                    for player in batting_data.get('players', []):
+                        all_players.append((player['player_id'], player.get('bestball_score', 0)))
+
+            # Load pitching cache
+            pitching_cache = cache_dir / 'pitching_players.json'
+            if pitching_cache.exists():
+                with open(pitching_cache, 'r') as f:
+                    pitching_data = json.load(f)
+                    for player in pitching_data.get('players', []):
+                        all_players.append((player['player_id'], player.get('bestball_score', 0)))
+
+            # Sort ALL players by bestball_score to get overall EV rank
+            all_players.sort(key=lambda x: x[1], reverse=True)
+
+            # Create mapping: player_id -> (overall_rank, bestball_score)
+            for i, (player_id, score) in enumerate(all_players, 1):
+                ev_rankings[player_id] = (i, score)
+
+            logger.info(f"Loaded {len(ev_rankings)} players with EV rankings from cache")
 
         self.available_players = [
             AvailablePlayer(
@@ -136,7 +187,9 @@ class MockDraftEngine:
                 player_name=p['player_name'],
                 position=p['position'],
                 team=p['team'],
-                rotowire_id=p.get('rotowire_id', 0)
+                rotowire_id=p.get('rotowire_id', 0),
+                ev_rank=ev_rankings.get(p['db_player_id'], (999, 0))[0],
+                bestball_score=ev_rankings.get(p['db_player_id'], (999, 0))[1]
             )
             for p in data['rankings']
         ]
@@ -252,6 +305,82 @@ class MockDraftEngine:
         """Check if draft is finished."""
         return self.current_round > self.NUM_ROUNDS
 
+    def _check_adp_capture(
+        self,
+        overall_pick: int,
+        needs: Dict[str, int]
+    ) -> Optional[AvailablePlayer]:
+        """
+        Check for ADP capture opportunities - players falling way below their ADP.
+
+        Early round falls are more valuable than late round falls.
+        A player with ADP 10 falling to pick 96 is a MASSIVE value capture.
+
+        Args:
+            overall_pick: Current overall pick number
+            needs: Position needs dictionary
+
+        Returns:
+            Player to capture if value is high enough, None otherwise
+        """
+        # Round multiplier - early falls are worth more
+        # Round 1-3: 2.0x value (elite player falling = must grab)
+        # Round 4-6: 1.5x value (still premium territory)
+        # Round 7-10: 1.2x value (mid-round value)
+        # Round 11+: 1.0x value (late round, less impactful)
+        if self.current_round <= 3:
+            round_multiplier = 2.0
+        elif self.current_round <= 6:
+            round_multiplier = 1.5
+        elif self.current_round <= 10:
+            round_multiplier = 1.2
+        else:
+            round_multiplier = 1.0
+
+        # Minimum ADP fall threshold to trigger capture
+        # Early rounds need bigger falls (since we're sacrificing premium picks)
+        min_fall_threshold = 24 if self.current_round <= 3 else 36
+
+        # Value threshold to trigger capture (after round multiplier)
+        # Higher = more selective, Lower = grab more falls
+        value_threshold = 50
+
+        best_capture = None
+        best_value = 0
+
+        for player in self.available_players:
+            # How far has this player fallen below their ADP?
+            adp_fall = overall_pick - player.rank
+
+            # Only consider significant falls
+            if adp_fall < min_fall_threshold:
+                continue
+
+            # Check if we can use this position (have room or need it)
+            pos = player.position
+            if needs.get(pos, 0) <= 0:
+                # We don't need this position, reduce value but don't skip
+                # (still might be too good to pass up)
+                position_penalty = 0.5
+            else:
+                position_penalty = 1.0
+
+            # Calculate capture value
+            # Value = (how far they fell) * (round importance) * (position fit)
+            capture_value = adp_fall * round_multiplier * position_penalty
+
+            # Bonus for elite players (ADP top 24) falling
+            if player.rank <= 24:
+                capture_value *= 1.3
+            elif player.rank <= 48:
+                capture_value *= 1.15
+
+            if capture_value > value_threshold and capture_value > best_value:
+                best_value = capture_value
+                best_capture = player
+
+        return best_capture
+
     def ai_select_player(self, team: DraftTeam) -> AvailablePlayer:
         """
         AI selects a player based on archetype strategy.
@@ -271,6 +400,16 @@ class MockDraftEngine:
             'OF': max(0, targets['OF'] - position_counts['OF'])
         }
         total_needs = sum(needs.values())
+
+        # =================================================================
+        # ADP CAPTURE MODEL - Grab players falling significantly below ADP
+        # Early round falls are more valuable than late round falls
+        # =================================================================
+        adp_capture = self._check_adp_capture(overall_pick, needs)
+        if adp_capture:
+            logger.debug(f"Team {team.team_id} ADP capturing {adp_capture.player_name} "
+                        f"(ADP {adp_capture.rank} at pick {overall_pick})")
+            return adp_capture
 
         # Calculate ADP window based on archetype
         if archetype == DraftArchetype.ADP_ANDY:

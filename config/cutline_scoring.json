@@ -1,0 +1,27 @@
+{
+  "platform": "Cutline",
+  "format": "Best Ball Championship",
+  "description": "High Stakes Fantasy Cutline Best Ball Championship scoring",
+  "batting": {
+    "AB": -1,
+    "H": 4,
+    "R": 2,
+    "HR": 6,
+    "RBI": 2,
+    "SB": 5
+  },
+  "pitching": {
+    "IP": 3,
+    "H": -1,
+    "ER": -2,
+    "BB": -1,
+    "SO": 1,
+    "W": 6,
+    "SV": 8
+  },
+  "notes": [
+    "Batting: -1 per AB penalizes outs, +4 per hit rewards contact",
+    "All hits worth same (+4), no bonus for XBH",
+    "Pitching includes Saves (+8) unlike other platforms"
+  ]
+}
