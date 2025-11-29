@@ -368,15 +368,23 @@ class CutlineDraftEngine:
         seen_player_ids = set()
         seen_player_names = set()
 
-        # Process Cutline rankings first (these have Cutline-specific scores)
+        # Process Cutline rankings first (these are the authoritative Cutline ranks)
         if cutline_data:
             for p in cutline_data.get('rankings', []):
                 position = p.get('position', 'UTIL')
                 detailed_pos = self._get_detailed_position(p, position)
-                player_id = p.get('db_player_id', p.get('player_id', 0))
 
-                # Use Cutline bestball_score directly from the rankings
+                # Generate unique ID from name if not provided
+                player_id = p.get('db_player_id', p.get('player_id', 0))
+                if player_id == 0:
+                    player_id = hash(p['player_name'].lower()) & 0xFFFFFF
+
+                # Estimate bestball_score from rank if not provided
+                # Top players ~60, decreases by rank
                 cutline_score = p.get('bestball_score', 0)
+                if cutline_score == 0:
+                    rank = p['rank']
+                    cutline_score = max(65.0 - (rank * 0.08), 20.0)
 
                 player = CutlinePlayer(
                     rank=p['rank'],
