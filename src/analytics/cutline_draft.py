@@ -328,12 +328,14 @@ class CutlineDraftEngine:
 
         Merges Cutline-specific rankings with ADP fallback to ensure
         enough players for a complete draft (420+ for 10 teams x 42 rounds).
+        Also loads proprietary EV rankings for value comparison.
         """
         data_dir = Path(__file__).parent.parent.parent / 'data'
 
-        # Load primary Cutline rankings (has Cutline-specific bestball_score)
+        # Load primary Cutline rankings (draft order)
         cutline_path = data_dir / 'cutline_rankings.json'
         adp_path = data_dir / 'adp_rankings_2025.json'
+        ev_path = data_dir / 'cutline_ev_rankings.json'
 
         cutline_data = None
         adp_data = None
@@ -351,17 +353,16 @@ class CutlineDraftEngine:
         if not cutline_data and not adp_data:
             raise FileNotFoundError("No rankings files found")
 
-        # Load EV rankings from persistent file
-        ev_rankings = {}
-        persistent_path = data_dir / 'bestball_rankings.json'
-        if persistent_path.exists():
-            with open(persistent_path, 'r') as f:
+        # Load proprietary EV rankings (personal value assessment)
+        ev_rankings_by_name = {}
+        if ev_path.exists():
+            with open(ev_path, 'r') as f:
                 ev_data = json.load(f)
-                for p in ev_data.get('players', []):
-                    ev_rankings[p['player_id']] = (
-                        p.get('ev_rank', 999),
-                        p.get('bestball_score', 0)
-                    )
+                for p in ev_data.get('rankings', []):
+                    # Normalize name for matching
+                    name_key = self._normalize_name(p['player_name'])
+                    ev_rankings_by_name[name_key] = p['ev_rank']
+                logger.info(f"Loaded {len(ev_rankings_by_name)} proprietary EV rankings")
 
         # Build player list - Cutline rankings first, then ADP fallback
         self.available_players = []
@@ -386,13 +387,17 @@ class CutlineDraftEngine:
                     rank = p['rank']
                     cutline_score = max(65.0 - (rank * 0.08), 20.0)
 
+                # Look up proprietary EV rank by normalized name
+                name_key = self._normalize_name(p['player_name'])
+                ev_rank = ev_rankings_by_name.get(name_key, 999)
+
                 player = CutlinePlayer(
                     rank=p['rank'],
                     player_id=player_id,
                     player_name=p['player_name'],
                     position=detailed_pos,
                     team=p.get('team', ''),
-                    ev_rank=p['rank'],  # Use Cutline rank as EV rank
+                    ev_rank=ev_rank,  # Use proprietary EV rank
                     bestball_score=cutline_score,
                 )
                 self.available_players.append(player)
@@ -413,11 +418,12 @@ class CutlineDraftEngine:
                 position = p.get('position', 'UTIL')
                 detailed_pos = self._get_detailed_position(p, position)
 
-                # Use EV rankings if available, otherwise estimate from ADP rank
-                ev_rank, bb_score = ev_rankings.get(player_id, (999, 0))
-                if bb_score == 0:
-                    # Estimate a modest score for ADP-only players
-                    bb_score = max(30.0 - (next_rank - 200) * 0.1, 20.0)
+                # Look up proprietary EV rank by normalized name
+                name_key = self._normalize_name(p['player_name'])
+                ev_rank = ev_rankings_by_name.get(name_key, 999)
+
+                # Estimate bestball score for ADP-only players
+                bb_score = max(30.0 - (next_rank - 200) * 0.1, 20.0)
 
                 player = CutlinePlayer(
                     rank=next_rank,
@@ -434,6 +440,35 @@ class CutlineDraftEngine:
                 next_rank += 1
 
         logger.info(f"Loaded {len(self.available_players)} total players for Cutline draft")
+
+    def _normalize_name(self, name: str) -> str:
+        """
+        Normalize player name for matching between ranking systems.
+
+        Handles:
+        - Case normalization
+        - Accent removal (José -> Jose)
+        - Suffix variations (Jr., Jr, II, etc.)
+        - Common name variations
+        """
+        import unicodedata
+
+        # Lowercase
+        name = name.lower().strip()
+
+        # Remove accents (José -> Jose, Ramírez -> Ramirez)
+        name = unicodedata.normalize('NFKD', name)
+        name = ''.join(c for c in name if not unicodedata.combining(c))
+
+        # Standardize suffixes
+        name = name.replace(' jr.', ' jr').replace(' sr.', ' sr')
+        name = name.replace(' ii', '').replace(' iii', '').replace(' iv', '')
+
+        # Remove periods and extra spaces
+        name = name.replace('.', '').replace("'", '')
+        name = ' '.join(name.split())
+
+        return name
 
     def _get_detailed_position(self, player_data: dict, simplified_pos: str) -> str:
         """
