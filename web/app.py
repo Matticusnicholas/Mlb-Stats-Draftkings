@@ -1096,7 +1096,6 @@ def simulate_cutline_season(draft_id):
 
         # Get user roster
         roster = engine.export_roster_for_simulation()
-        player_ids = [p['player_id'] for p in roster]
 
         # Run simulation with Cutline scoring
         simulator = DraftSimulator(
@@ -1106,20 +1105,21 @@ def simulate_cutline_season(draft_id):
             weeks_in_season=26
         )
 
-        results = simulator.simulate_roster(player_ids)
+        results = simulator.run_monte_carlo(roster)
 
         return jsonify({
             'success': True,
             'simulation_results': {
                 'num_simulations': num_sims,
-                'mean_total_points': round(results.get('mean_total', 0), 1),
-                'std_dev': round(results.get('std_dev', 0), 1),
-                'percentile_10': round(results.get('p10', 0), 1),
-                'percentile_50': round(results.get('p50', 0), 1),
-                'percentile_90': round(results.get('p90', 0), 1),
+                'mean_total_points': round(results.get('mean_season_points', 0), 1),
+                'std_dev': round(results.get('std_season_points', 0), 1),
+                'percentile_10': round(results.get('percentile_10', 0), 1),
+                'percentile_50': round(results.get('percentile_50', 0), 1),
+                'percentile_90': round(results.get('percentile_90', 0), 1),
                 'weekly_avg': round(results.get('weekly_avg', 0), 1),
                 'ceiling': round(results.get('ceiling', 0), 1),
                 'floor': round(results.get('floor', 0), 1),
+                'best_week': round(results.get('best_week', 0), 1),
             },
             'roster': roster
         })
