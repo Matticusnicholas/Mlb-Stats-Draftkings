@@ -891,5 +891,277 @@ def get_all_rosters(draft_id):
     })
 
 
+# ============================================================================
+# NFBC Cutline Championship Draft Routes
+# ============================================================================
+
+# Store active Cutline drafts
+_active_cutline_drafts = {}
+
+
+@app.route('/cutline-draft')
+def cutline_draft_page():
+    """Render Cutline draft simulator page."""
+    return render_template('cutline_draft.html')
+
+
+@app.route('/api/cutline-draft/start', methods=['POST'])
+def start_cutline_draft():
+    """
+    Start a new Cutline Championship draft.
+
+    POST body:
+        user_position: Draft position (1-10)
+    """
+    try:
+        from src.analytics.cutline_draft import CutlineDraftEngine
+
+        data = request.get_json() or {}
+        user_position = data.get('user_position', 1)
+
+        if not 1 <= user_position <= 10:
+            return jsonify({'success': False, 'error': 'Position must be 1-10'}), 400
+
+        # Create new draft
+        draft_id = f"cutline_{datetime.now().strftime('%Y%m%d%H%M%S')}_{user_position}"
+        engine = CutlineDraftEngine(user_position=user_position)
+
+        _active_cutline_drafts[draft_id] = engine
+
+        # Simulate until user's first pick
+        picks_made = engine.simulate_until_user_pick()
+
+        return jsonify({
+            'success': True,
+            'draft_id': draft_id,
+            'state': engine.get_draft_state(),
+            'picks_made': [
+                {
+                    'round': p.round_num,
+                    'pick': p.pick_num,
+                    'overall': p.overall_pick,
+                    'team_id': p.team_id,
+                    'player': p.player_name,
+                    'position': p.position,
+                    'rank': p.rank
+                }
+                for p in picks_made
+            ]
+        })
+
+    except Exception as e:
+        logger.error(f"Error starting Cutline draft: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/cutline-draft/<draft_id>/pick', methods=['POST'])
+def make_cutline_draft_pick(draft_id):
+    """Make a pick in an active Cutline draft."""
+    try:
+        if draft_id not in _active_cutline_drafts:
+            return jsonify({'success': False, 'error': 'Draft not found'}), 404
+
+        engine = _active_cutline_drafts[draft_id]
+        data = request.get_json()
+        player_id = data.get('player_id')
+
+        if not player_id:
+            return jsonify({'success': False, 'error': 'player_id required'}), 400
+
+        # Make user's pick
+        user_pick = engine.user_make_pick(player_id)
+
+        if not user_pick:
+            return jsonify({'success': False, 'error': 'Not your turn'}), 400
+
+        # Simulate until next user pick
+        ai_picks = engine.simulate_until_user_pick()
+
+        return jsonify({
+            'success': True,
+            'user_pick': {
+                'round': user_pick.round_num,
+                'pick': user_pick.pick_num,
+                'overall': user_pick.overall_pick,
+                'player': user_pick.player_name,
+                'position': user_pick.position,
+                'rank': user_pick.rank
+            },
+            'ai_picks': [
+                {
+                    'round': p.round_num,
+                    'pick': p.pick_num,
+                    'overall': p.overall_pick,
+                    'team_id': p.team_id,
+                    'player': p.player_name,
+                    'position': p.position,
+                    'rank': p.rank
+                }
+                for p in ai_picks
+            ],
+            'state': engine.get_draft_state()
+        })
+
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        logger.error(f"Error making Cutline pick: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/cutline-draft/<draft_id>/state')
+def get_cutline_draft_state(draft_id):
+    """Get current state of a Cutline draft."""
+    if draft_id not in _active_cutline_drafts:
+        return jsonify({'success': False, 'error': 'Draft not found'}), 404
+
+    engine = _active_cutline_drafts[draft_id]
+    return jsonify({
+        'success': True,
+        'state': engine.get_draft_state()
+    })
+
+
+@app.route('/api/cutline-draft/<draft_id>/available')
+def get_cutline_available_players(draft_id):
+    """Get available players in Cutline draft."""
+    if draft_id not in _active_cutline_drafts:
+        return jsonify({'success': False, 'error': 'Draft not found'}), 404
+
+    engine = _active_cutline_drafts[draft_id]
+
+    position = request.args.get('position')
+    limit = int(request.args.get('limit', 50))
+
+    players = engine.get_available_players_by_position(position)
+
+    return jsonify({
+        'success': True,
+        'players': players[:limit]
+    })
+
+
+@app.route('/api/cutline-draft/<draft_id>/roster')
+def get_cutline_user_roster(draft_id):
+    """Get user's roster in Cutline draft."""
+    if draft_id not in _active_cutline_drafts:
+        return jsonify({'success': False, 'error': 'Draft not found'}), 404
+
+    engine = _active_cutline_drafts[draft_id]
+    roster = engine.get_user_roster()
+
+    return jsonify({
+        'success': True,
+        'roster': [
+            {
+                'round': p.round_num,
+                'pick': p.pick_num,
+                'player_id': p.player_id,
+                'player_name': p.player_name,
+                'position': p.position,
+                'team': p.team_abbr,
+                'rank': p.rank,
+                'ev_rank': p.ev_rank
+            }
+            for p in roster
+        ]
+    })
+
+
+@app.route('/api/cutline-draft/<draft_id>/simulate', methods=['POST'])
+def simulate_cutline_season(draft_id):
+    """
+    Run Monte Carlo simulation on completed Cutline draft.
+
+    POST body:
+        num_simulations: Number of simulations (default: 500)
+    """
+    if draft_id not in _active_cutline_drafts:
+        return jsonify({'success': False, 'error': 'Draft not found'}), 404
+
+    engine = _active_cutline_drafts[draft_id]
+
+    if not engine.is_draft_complete():
+        return jsonify({'success': False, 'error': 'Draft not complete'}), 400
+
+    try:
+        from src.analytics.draft_simulator import DraftSimulator
+
+        data = request.get_json() or {}
+        num_sims = min(data.get('num_simulations', 500), 1000)
+
+        # Get user roster
+        roster = engine.export_roster_for_simulation()
+        player_ids = [p['player_id'] for p in roster]
+
+        # Run simulation with Cutline scoring
+        simulator = DraftSimulator(
+            db,
+            scoring_system='cutline',
+            num_simulations=num_sims,
+            weeks_in_season=26
+        )
+
+        results = simulator.simulate_roster(player_ids)
+
+        return jsonify({
+            'success': True,
+            'simulation_results': {
+                'num_simulations': num_sims,
+                'mean_total_points': round(results.get('mean_total', 0), 1),
+                'std_dev': round(results.get('std_dev', 0), 1),
+                'percentile_10': round(results.get('p10', 0), 1),
+                'percentile_50': round(results.get('p50', 0), 1),
+                'percentile_90': round(results.get('p90', 0), 1),
+                'weekly_avg': round(results.get('weekly_avg', 0), 1),
+                'ceiling': round(results.get('ceiling', 0), 1),
+                'floor': round(results.get('floor', 0), 1),
+            },
+            'roster': roster
+        })
+
+    except Exception as e:
+        logger.error(f"Error running Cutline simulation: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/cutline-draft/<draft_id>/all-rosters')
+def get_cutline_all_rosters(draft_id):
+    """Get all teams' rosters for completed Cutline draft."""
+    if draft_id not in _active_cutline_drafts:
+        return jsonify({'success': False, 'error': 'Draft not found'}), 404
+
+    engine = _active_cutline_drafts[draft_id]
+
+    rosters = {}
+    for team in engine.teams:
+        rosters[team.team_id] = {
+            'name': team.name,
+            'archetype': team.archetype.value,
+            'position_counts': team.get_position_counts(),
+            'roster': [
+                {
+                    'round': p.round_num,
+                    'player_name': p.player_name,
+                    'position': p.position,
+                    'team': p.team_abbr,
+                    'rank': p.rank
+                }
+                for p in team.roster
+            ]
+        }
+
+    return jsonify({
+        'success': True,
+        'rosters': rosters
+    })
+
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

@@ -1,0 +1,1221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NFBC Cutline Championship Draft - MLB Best Ball</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a1929;
+            color: #fff;
+            min-height: 100vh;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #8b0000 0%, #b22222 100%);
+            padding: 15px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+
+        .header h1 {
+            font-size: 1.4rem;
+            font-weight: 600;
+        }
+
+        .header h1 span {
+            font-size: 0.8rem;
+            opacity: 0.8;
+            font-weight: 400;
+        }
+
+        .header-nav a {
+            color: #fff;
+            text-decoration: none;
+            margin-left: 20px;
+            opacity: 0.8;
+        }
+
+        .header-nav a:hover {
+            opacity: 1;
+        }
+
+        /* Setup Screen */
+        .setup-screen {
+            max-width: 700px;
+            margin: 60px auto;
+            padding: 40px;
+            background: #132f4c;
+            border-radius: 12px;
+            text-align: center;
+        }
+
+        .setup-screen h2 {
+            margin-bottom: 10px;
+            font-size: 1.8rem;
+        }
+
+        .cutline-info {
+            background: #0d2137;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 30px;
+            text-align: left;
+        }
+
+        .cutline-info h4 {
+            color: #ff6b6b;
+            margin-bottom: 15px;
+        }
+
+        .scoring-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            font-size: 0.85rem;
+        }
+
+        .scoring-grid h5 {
+            color: #90caf9;
+            margin-bottom: 8px;
+        }
+
+        .scoring-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 3px 0;
+            border-bottom: 1px solid #1e3a5f;
+        }
+
+        .scoring-item span:last-child {
+            color: #4caf50;
+            font-weight: 600;
+        }
+
+        .scoring-item.negative span:last-child {
+            color: #ef5350;
+        }
+
+        .position-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 10px;
+            margin: 30px 0;
+        }
+
+        .position-btn {
+            padding: 20px;
+            border: 2px solid #8b0000;
+            background: transparent;
+            color: #fff;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1.2rem;
+            font-weight: bold;
+            transition: all 0.2s;
+        }
+
+        .position-btn:hover {
+            background: #8b0000;
+        }
+
+        .position-btn.selected {
+            background: #8b0000;
+            border-color: #dc143c;
+        }
+
+        .start-btn {
+            padding: 15px 50px;
+            background: linear-gradient(135deg, #8b0000 0%, #b22222 100%);
+            border: none;
+            color: #fff;
+            border-radius: 8px;
+            font-size: 1.2rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .start-btn:hover {
+            transform: scale(1.05);
+        }
+
+        .start-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Draft Screen */
+        .draft-screen {
+            display: none;
+            height: calc(100vh - 60px);
+        }
+
+        .draft-container {
+            display: grid;
+            grid-template-columns: 320px 1fr 380px;
+            height: 100%;
+            gap: 0;
+        }
+
+        /* Left Panel - Your Roster */
+        .roster-panel {
+            background: #132f4c;
+            border-right: 1px solid #1e3a5f;
+            overflow-y: auto;
+        }
+
+        .panel-header {
+            padding: 15px;
+            background: #1e3a5f;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .roster-needs {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 5px;
+            padding: 10px;
+            background: #0d2137;
+            font-size: 0.75rem;
+        }
+
+        .need-item {
+            text-align: center;
+            padding: 5px;
+            border-radius: 4px;
+            background: #132f4c;
+        }
+
+        .need-item.fulfilled {
+            background: #1a472a;
+        }
+
+        .need-item .pos {
+            color: #ffd54f;
+            font-weight: 600;
+        }
+
+        .need-item .count {
+            color: #90caf9;
+        }
+
+        .roster-list {
+            padding: 10px;
+        }
+
+        .roster-slot {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 10px;
+            margin-bottom: 4px;
+            background: #0a1929;
+            border-radius: 6px;
+            font-size: 0.85rem;
+        }
+
+        .roster-slot.filled {
+            background: #1a2f1a;
+        }
+
+        .roster-slot .round {
+            color: #90caf9;
+            font-weight: 600;
+            width: 30px;
+        }
+
+        .roster-slot .player-name {
+            flex: 1;
+            margin-left: 8px;
+        }
+
+        .roster-slot .position {
+            font-weight: 600;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.7rem;
+        }
+
+        .roster-slot .team-abbr {
+            color: #b0bec5;
+            font-size: 0.75rem;
+            margin-left: 8px;
+        }
+
+        /* Position colors */
+        .pos-C { background: #7b1fa2; color: #fff; }
+        .pos-1B { background: #0288d1; color: #fff; }
+        .pos-2B { background: #00897b; color: #fff; }
+        .pos-3B { background: #f57c00; color: #fff; }
+        .pos-SS { background: #5e35b1; color: #fff; }
+        .pos-OF { background: #388e3c; color: #fff; }
+        .pos-P { background: #d32f2f; color: #fff; }
+        .pos-UTIL { background: #546e7a; color: #fff; }
+
+        /* Center Panel - Draft Board */
+        .draft-board-panel {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .on-the-clock {
+            padding: 20px;
+            background: linear-gradient(135deg, #1e88e5 0%, #1565c0 100%);
+            text-align: center;
+        }
+
+        .on-the-clock.user-pick {
+            background: linear-gradient(135deg, #8b0000 0%, #b22222 100%);
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.85; }
+        }
+
+        .on-the-clock h3 {
+            font-size: 1.3rem;
+            margin-bottom: 5px;
+        }
+
+        .on-the-clock .pick-info {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+
+        .draft-log {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+            background: #0d2137;
+        }
+
+        .draft-pick-log {
+            display: flex;
+            padding: 8px 12px;
+            margin-bottom: 4px;
+            background: #132f4c;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            align-items: center;
+        }
+
+        .draft-pick-log.user-pick {
+            background: #2a1a1a;
+            border-left: 3px solid #dc143c;
+        }
+
+        .draft-pick-log .pick-num {
+            width: 50px;
+            font-weight: 600;
+            color: #90caf9;
+        }
+
+        .draft-pick-log .team-name {
+            width: 140px;
+            color: #b0bec5;
+            font-size: 0.75rem;
+        }
+
+        .draft-pick-log .player-info {
+            flex: 1;
+        }
+
+        .draft-pick-log .rank-badge {
+            background: #1e88e5;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+        }
+
+        /* Right Panel - Available Players */
+        .players-panel {
+            background: #132f4c;
+            border-left: 1px solid #1e3a5f;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .filter-bar {
+            padding: 10px;
+            background: #1e3a5f;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+        }
+
+        .filter-btn {
+            padding: 5px 10px;
+            border: 1px solid #8b0000;
+            background: transparent;
+            color: #fff;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.75rem;
+        }
+
+        .filter-btn.active {
+            background: #8b0000;
+        }
+
+        .search-box {
+            width: calc(100% - 20px);
+            padding: 10px;
+            background: #0a1929;
+            border: 1px solid #1e3a5f;
+            color: #fff;
+            border-radius: 4px;
+            margin: 10px;
+            margin-top: 5px;
+        }
+
+        .ev-legend {
+            display: flex;
+            gap: 8px;
+            padding: 5px 10px;
+            font-size: 0.7rem;
+            background: #0d2137;
+            align-items: center;
+        }
+
+        .ev-legend span:first-child {
+            color: #90caf9;
+        }
+
+        .available-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0 10px 10px;
+        }
+
+        .available-player {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            margin-bottom: 5px;
+            background: #0a1929;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .available-player:hover {
+            background: #1e3a5f;
+            transform: translateX(5px);
+        }
+
+        .available-player .rank {
+            width: 35px;
+            font-weight: 600;
+            color: #90caf9;
+        }
+
+        .available-player .name {
+            flex: 1;
+        }
+
+        .available-player .team {
+            color: #b0bec5;
+            font-size: 0.8rem;
+            margin-right: 10px;
+        }
+
+        .available-player .pos-badge {
+            padding: 3px 6px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
+
+        .available-player .ev-rank {
+            font-size: 0.65rem;
+            padding: 2px 5px;
+            border-radius: 3px;
+            margin-right: 6px;
+            font-weight: 600;
+        }
+
+        .ev-rank.value { background: #2e7d32; color: #fff; }
+        .ev-rank.neutral { background: #546e7a; color: #fff; }
+        .ev-rank.fade { background: #c62828; color: #fff; }
+
+        /* Draft Complete Screen */
+        .draft-complete {
+            display: none;
+            padding: 30px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .complete-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .complete-header h2 {
+            font-size: 2rem;
+            color: #dc143c;
+            margin-bottom: 10px;
+        }
+
+        .roster-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .final-roster {
+            background: #132f4c;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .final-roster h3 {
+            padding: 15px;
+            background: #8b0000;
+        }
+
+        .final-roster-list {
+            padding: 15px;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .final-pick {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #1e3a5f;
+            font-size: 0.85rem;
+        }
+
+        .final-pick:last-child {
+            border-bottom: none;
+        }
+
+        /* Simulation Section */
+        .simulation-section {
+            background: #132f4c;
+            border-radius: 12px;
+            padding: 30px;
+            margin-top: 30px;
+        }
+
+        .simulation-section h3 {
+            margin-bottom: 20px;
+            font-size: 1.5rem;
+            color: #dc143c;
+        }
+
+        .sim-controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .sim-controls label {
+            color: #b0bec5;
+        }
+
+        .sim-controls select {
+            padding: 8px 12px;
+            background: #0a1929;
+            border: 1px solid #1e3a5f;
+            color: #fff;
+            border-radius: 4px;
+        }
+
+        .run-sim-btn {
+            padding: 12px 30px;
+            background: linear-gradient(135deg, #8b0000 0%, #b22222 100%);
+            border: none;
+            color: #fff;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .run-sim-btn:disabled {
+            opacity: 0.5;
+        }
+
+        .sim-results {
+            display: none;
+        }
+
+        .sim-stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .sim-stat-card {
+            background: #0a1929;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .sim-stat-card .value {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: #dc143c;
+        }
+
+        .sim-stat-card .label {
+            font-size: 0.85rem;
+            color: #b0bec5;
+            margin-top: 5px;
+        }
+
+        .charts-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .chart-container {
+            background: #0a1929;
+            border-radius: 8px;
+            padding: 20px;
+        }
+
+        .chart-container h4 {
+            margin-bottom: 15px;
+            color: #90caf9;
+        }
+
+        .chart-container canvas {
+            max-height: 300px;
+        }
+
+        /* Loading spinner */
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 40px;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #1e3a5f;
+            border-top-color: #dc143c;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Responsive */
+        @media (max-width: 1200px) {
+            .draft-container {
+                grid-template-columns: 280px 1fr 320px;
+            }
+        }
+
+        @media (max-width: 900px) {
+            .charts-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>NFBC Cutline Championship <span>| 10-Team Best Ball</span></h1>
+        <nav class="header-nav">
+            <a href="/">Home</a>
+            <a href="/mock-draft">DK Mock Draft</a>
+            <a href="/draft">Season Simulator</a>
+        </nav>
+    </div>
+
+    <!-- Setup Screen -->
+    <div class="setup-screen" id="setupScreen">
+        <h2>NFBC Cutline Championship Draft</h2>
+        <p style="color: #b0bec5; margin-bottom: 20px;">10-Team Snake Draft - 42 Rounds</p>
+
+        <div class="cutline-info">
+            <h4>Cutline Scoring System</h4>
+            <div class="scoring-grid">
+                <div>
+                    <h5>Batting</h5>
+                    <div class="scoring-item negative"><span>At Bat (AB)</span><span>-1</span></div>
+                    <div class="scoring-item"><span>Hit (H)</span><span>+4</span></div>
+                    <div class="scoring-item"><span>Home Run (HR)</span><span>+6</span></div>
+                    <div class="scoring-item"><span>Run (R)</span><span>+2</span></div>
+                    <div class="scoring-item"><span>RBI</span><span>+2</span></div>
+                    <div class="scoring-item"><span>Stolen Base (SB)</span><span>+5</span></div>
+                </div>
+                <div>
+                    <h5>Pitching</h5>
+                    <div class="scoring-item"><span>Inning Pitched (IP)</span><span>+3</span></div>
+                    <div class="scoring-item negative"><span>Hit Allowed (H)</span><span>-1</span></div>
+                    <div class="scoring-item negative"><span>Earned Run (ER)</span><span>-2</span></div>
+                    <div class="scoring-item negative"><span>Walk (BB)</span><span>-1</span></div>
+                    <div class="scoring-item"><span>Strikeout (SO)</span><span>+1</span></div>
+                    <div class="scoring-item"><span>Win (W)</span><span>+6</span></div>
+                    <div class="scoring-item"><span>Save (SV)</span><span>+8</span></div>
+                </div>
+            </div>
+        </div>
+
+        <p style="color: #90caf9; margin-bottom: 15px;">Select Your Draft Position (1-10)</p>
+        <div class="position-grid">
+            <button class="position-btn" data-pos="1">1</button>
+            <button class="position-btn" data-pos="2">2</button>
+            <button class="position-btn" data-pos="3">3</button>
+            <button class="position-btn" data-pos="4">4</button>
+            <button class="position-btn" data-pos="5">5</button>
+            <button class="position-btn" data-pos="6">6</button>
+            <button class="position-btn" data-pos="7">7</button>
+            <button class="position-btn" data-pos="8">8</button>
+            <button class="position-btn" data-pos="9">9</button>
+            <button class="position-btn" data-pos="10">10</button>
+        </div>
+        <button class="start-btn" id="startDraftBtn" disabled>Start Cutline Draft</button>
+    </div>
+
+    <!-- Draft Screen -->
+    <div class="draft-screen" id="draftScreen">
+        <div class="draft-container">
+            <!-- Left Panel - Your Roster -->
+            <div class="roster-panel">
+                <div class="panel-header">Your Roster (0/42)</div>
+                <div class="roster-needs" id="rosterNeeds">
+                    <div class="need-item"><span class="pos">C</span> <span class="count">0/3</span></div>
+                    <div class="need-item"><span class="pos">1B</span> <span class="count">0/3</span></div>
+                    <div class="need-item"><span class="pos">2B</span> <span class="count">0/3</span></div>
+                    <div class="need-item"><span class="pos">3B</span> <span class="count">0/3</span></div>
+                    <div class="need-item"><span class="pos">SS</span> <span class="count">0/3</span></div>
+                    <div class="need-item"><span class="pos">OF</span> <span class="count">0/8</span></div>
+                    <div class="need-item"><span class="pos">P</span> <span class="count">0/12</span></div>
+                    <div class="need-item"><span class="pos">DH</span> <span class="count">0/1</span></div>
+                </div>
+                <div class="roster-list" id="rosterList">
+                    <!-- Roster slots will be populated here -->
+                </div>
+            </div>
+
+            <!-- Center Panel - Draft Board -->
+            <div class="draft-board-panel">
+                <div class="on-the-clock" id="onTheClock">
+                    <h3 id="clockTeam">Starting Draft...</h3>
+                    <div class="pick-info">
+                        <span id="clockRound">Round 1</span> |
+                        <span id="clockPick">Pick 1</span> |
+                        <span id="clockOverall">Overall: 1</span>
+                    </div>
+                </div>
+                <div class="draft-log" id="draftLog">
+                    <!-- Pick log will be populated here -->
+                </div>
+            </div>
+
+            <!-- Right Panel - Available Players -->
+            <div class="players-panel">
+                <div class="panel-header">Available Players</div>
+                <div class="filter-bar">
+                    <button class="filter-btn active" data-filter="ALL">All</button>
+                    <button class="filter-btn" data-filter="C">C</button>
+                    <button class="filter-btn" data-filter="1B">1B</button>
+                    <button class="filter-btn" data-filter="2B">2B</button>
+                    <button class="filter-btn" data-filter="3B">3B</button>
+                    <button class="filter-btn" data-filter="SS">SS</button>
+                    <button class="filter-btn" data-filter="MI">MI</button>
+                    <button class="filter-btn" data-filter="CI">CI</button>
+                    <button class="filter-btn" data-filter="OF">OF</button>
+                    <button class="filter-btn" data-filter="P">P</button>
+                </div>
+                <div class="ev-legend">
+                    <span>EV Key:</span>
+                    <span class="ev-rank value">Value</span>
+                    <span class="ev-rank neutral">Fair</span>
+                    <span class="ev-rank fade">Fade</span>
+                </div>
+                <input type="text" class="search-box" id="playerSearch" placeholder="Search players...">
+                <div class="available-list" id="availableList">
+                    <!-- Available players will be populated here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Draft Complete Screen -->
+    <div class="draft-complete" id="draftComplete">
+        <div class="complete-header">
+            <h2>Cutline Draft Complete!</h2>
+            <p>Your 42-player roster is ready for simulation</p>
+        </div>
+
+        <div class="roster-grid">
+            <div class="final-roster">
+                <h3>Your Final Roster</h3>
+                <div class="final-roster-list" id="finalRosterList">
+                    <!-- Final roster will be populated here -->
+                </div>
+            </div>
+            <div class="final-roster">
+                <h3>Position Breakdown</h3>
+                <div class="final-roster-list" id="positionBreakdown">
+                    <!-- Position breakdown will be populated here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Simulation Section -->
+        <div class="simulation-section">
+            <h3>Monte Carlo Season Simulation (Cutline Scoring)</h3>
+            <div class="sim-controls">
+                <label>Simulations:</label>
+                <select id="simCount">
+                    <option value="100">100</option>
+                    <option value="500" selected>500</option>
+                    <option value="1000">1000</option>
+                </select>
+                <button class="run-sim-btn" id="runSimBtn">Run Cutline Simulation</button>
+            </div>
+
+            <div class="loading" id="simLoading">
+                <div class="spinner"></div>
+                <p>Running Cutline simulations...</p>
+            </div>
+
+            <div class="sim-results" id="simResults">
+                <div class="sim-stats-grid">
+                    <div class="sim-stat-card">
+                        <div class="value" id="avgSeason">-</div>
+                        <div class="label">Avg Season</div>
+                    </div>
+                    <div class="sim-stat-card">
+                        <div class="value" id="medianSeason">-</div>
+                        <div class="label">Median</div>
+                    </div>
+                    <div class="sim-stat-card">
+                        <div class="value" id="weeklyAvg">-</div>
+                        <div class="label">Weekly Avg</div>
+                    </div>
+                    <div class="sim-stat-card">
+                        <div class="value" id="ceiling">-</div>
+                        <div class="label">Ceiling (90th)</div>
+                    </div>
+                    <div class="sim-stat-card">
+                        <div class="value" id="floor">-</div>
+                        <div class="label">Floor (10th)</div>
+                    </div>
+                </div>
+
+                <div class="charts-grid">
+                    <div class="chart-container">
+                        <h4>Season Outcome Distribution</h4>
+                        <canvas id="seasonChart"></canvas>
+                    </div>
+                    <div class="chart-container">
+                        <h4>Weekly Score Distribution</h4>
+                        <canvas id="weeklyChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // State
+        let draftId = null;
+        let selectedPosition = null;
+        let currentFilter = 'ALL';
+        let availablePlayers = [];
+        let userRoster = [];
+        let seasonChart = null;
+        let weeklyChart = null;
+
+        // DOM Elements
+        const setupScreen = document.getElementById('setupScreen');
+        const draftScreen = document.getElementById('draftScreen');
+        const draftComplete = document.getElementById('draftComplete');
+        const startDraftBtn = document.getElementById('startDraftBtn');
+        const positionBtns = document.querySelectorAll('.position-btn');
+        const filterBtns = document.querySelectorAll('.filter-btn');
+        const playerSearch = document.getElementById('playerSearch');
+
+        // Position Selection
+        positionBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                positionBtns.forEach(b => b.classList.remove('selected'));
+                btn.classList.add('selected');
+                selectedPosition = parseInt(btn.dataset.pos);
+                startDraftBtn.disabled = false;
+            });
+        });
+
+        // Start Draft
+        startDraftBtn.addEventListener('click', async () => {
+            if (!selectedPosition) return;
+
+            startDraftBtn.disabled = true;
+            startDraftBtn.textContent = 'Starting...';
+
+            try {
+                const response = await fetch('/api/cutline-draft/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_position: selectedPosition })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    draftId = data.draft_id;
+                    setupScreen.style.display = 'none';
+                    draftScreen.style.display = 'block';
+                    updateDraftUI(data.state);
+                    loadAvailablePlayers();
+
+                    // Add picks to log
+                    data.picks_made.forEach(pick => addPickToLog(pick));
+                } else {
+                    alert('Error starting draft: ' + data.error);
+                    startDraftBtn.disabled = false;
+                    startDraftBtn.textContent = 'Start Cutline Draft';
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Error starting draft');
+                startDraftBtn.disabled = false;
+                startDraftBtn.textContent = 'Start Cutline Draft';
+            }
+        });
+
+        // Filter buttons
+        filterBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                filterBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentFilter = btn.dataset.filter;
+                renderAvailablePlayers();
+            });
+        });
+
+        // Search
+        playerSearch.addEventListener('input', () => {
+            renderAvailablePlayers();
+        });
+
+        async function loadAvailablePlayers() {
+            try {
+                const response = await fetch(`/api/cutline-draft/${draftId}/available?limit=200`);
+                const data = await response.json();
+                if (data.success) {
+                    availablePlayers = data.players;
+                    renderAvailablePlayers();
+                }
+            } catch (error) {
+                console.error('Error loading players:', error);
+            }
+        }
+
+        function renderAvailablePlayers() {
+            const list = document.getElementById('availableList');
+            const searchTerm = playerSearch.value.toLowerCase();
+
+            let filtered = availablePlayers;
+
+            // Filter by position
+            if (currentFilter !== 'ALL') {
+                if (currentFilter === 'MI') {
+                    filtered = filtered.filter(p => ['2B', 'SS'].includes(p.position));
+                } else if (currentFilter === 'CI') {
+                    filtered = filtered.filter(p => ['1B', '3B'].includes(p.position));
+                } else {
+                    filtered = filtered.filter(p => p.position === currentFilter);
+                }
+            }
+
+            // Filter by search
+            if (searchTerm) {
+                filtered = filtered.filter(p =>
+                    p.player_name.toLowerCase().includes(searchTerm) ||
+                    p.team.toLowerCase().includes(searchTerm)
+                );
+            }
+
+            list.innerHTML = filtered.slice(0, 100).map(player => {
+                const evDiff = player.rank - player.ev_rank;
+                let evClass = 'neutral';
+                if (evDiff > 15) evClass = 'value';
+                else if (evDiff < -15) evClass = 'fade';
+
+                return `
+                    <div class="available-player" onclick="makePick(${player.player_id})">
+                        <span class="rank">${player.rank}</span>
+                        <span class="name">${player.player_name}</span>
+                        <span class="team">${player.team}</span>
+                        <span class="ev-rank ${evClass}">EV ${player.ev_rank}</span>
+                        <span class="pos-badge pos-${player.position}">${player.position}</span>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function makePick(playerId) {
+            try {
+                const response = await fetch(`/api/cutline-draft/${draftId}/pick`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ player_id: playerId })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    // Add user's pick
+                    addPickToLog(data.user_pick, true);
+
+                    // Add AI picks
+                    data.ai_picks.forEach(pick => addPickToLog(pick));
+
+                    // Update UI
+                    updateDraftUI(data.state);
+                    loadAvailablePlayers();
+
+                    // Check if draft is complete
+                    if (data.state.is_complete) {
+                        showDraftComplete(data.state);
+                    }
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Error making pick');
+            }
+        }
+
+        function updateDraftUI(state) {
+            // Update clock
+            const clock = document.getElementById('onTheClock');
+            const clockTeam = document.getElementById('clockTeam');
+            const clockRound = document.getElementById('clockRound');
+            const clockPick = document.getElementById('clockPick');
+            const clockOverall = document.getElementById('clockOverall');
+
+            if (state.is_complete) {
+                clockTeam.textContent = 'Draft Complete!';
+                clock.classList.remove('user-pick');
+            } else if (state.is_user_pick) {
+                clockTeam.textContent = 'Your Pick!';
+                clock.classList.add('user-pick');
+            } else {
+                clockTeam.textContent = state.current_team.name;
+                clock.classList.remove('user-pick');
+            }
+
+            clockRound.textContent = `Round ${state.current_round}`;
+            clockPick.textContent = `Pick ${state.current_pick}`;
+            clockOverall.textContent = `Overall: ${state.overall_pick}`;
+
+            // Update roster
+            userRoster = state.user_roster;
+            renderUserRoster(state);
+
+            // Update panel header
+            document.querySelector('.roster-panel .panel-header').textContent =
+                `Your Roster (${userRoster.length}/42)`;
+        }
+
+        function renderUserRoster(state) {
+            const list = document.getElementById('rosterList');
+
+            list.innerHTML = userRoster.map(pick => `
+                <div class="roster-slot filled">
+                    <span class="round">R${pick.round}</span>
+                    <span class="player-name">${pick.player_name}</span>
+                    <span class="team-abbr">${pick.team || ''}</span>
+                    <span class="position pos-${pick.position}">${pick.position}</span>
+                </div>
+            `).join('');
+
+            // Update position needs
+            if (state.user_position_counts) {
+                const counts = state.user_position_counts;
+                const targets = { C: 3, '1B': 3, '2B': 3, '3B': 3, SS: 3, OF: 8, P: 12, UTIL: 1 };
+
+                const needsDiv = document.getElementById('rosterNeeds');
+                needsDiv.innerHTML = Object.entries(targets).map(([pos, target]) => {
+                    const count = counts[pos] || 0;
+                    const fulfilled = count >= target;
+                    return `
+                        <div class="need-item ${fulfilled ? 'fulfilled' : ''}">
+                            <span class="pos">${pos}</span>
+                            <span class="count">${count}/${target}</span>
+                        </div>
+                    `;
+                }).join('');
+            }
+        }
+
+        function addPickToLog(pick, isUser = false) {
+            const log = document.getElementById('draftLog');
+            const div = document.createElement('div');
+            div.className = `draft-pick-log ${isUser ? 'user-pick' : ''}`;
+            div.innerHTML = `
+                <span class="pick-num">${pick.round}.${pick.pick}</span>
+                <span class="team-name">${pick.team || `Team ${pick.team_id}`}</span>
+                <span class="player-info">${pick.player} <span class="pos-badge pos-${pick.position}">${pick.position}</span></span>
+                <span class="rank-badge">Rank ${pick.rank}</span>
+            `;
+            log.insertBefore(div, log.firstChild);
+        }
+
+        function showDraftComplete(state) {
+            draftScreen.style.display = 'none';
+            draftComplete.style.display = 'block';
+
+            // Render final roster
+            const finalList = document.getElementById('finalRosterList');
+            finalList.innerHTML = userRoster.map(pick => `
+                <div class="final-pick">
+                    <span>R${pick.round}: ${pick.player_name}</span>
+                    <span class="pos-badge pos-${pick.position}">${pick.position}</span>
+                </div>
+            `).join('');
+
+            // Render position breakdown
+            const breakdown = document.getElementById('positionBreakdown');
+            const counts = state.user_position_counts || {};
+            breakdown.innerHTML = Object.entries(counts)
+                .filter(([pos, count]) => count > 0)
+                .map(([pos, count]) => `
+                    <div class="final-pick">
+                        <span class="pos-badge pos-${pos}">${pos}</span>
+                        <span>${count} players</span>
+                    </div>
+                `).join('');
+        }
+
+        // Run Simulation
+        document.getElementById('runSimBtn').addEventListener('click', async () => {
+            const btn = document.getElementById('runSimBtn');
+            const loading = document.getElementById('simLoading');
+            const results = document.getElementById('simResults');
+            const numSims = document.getElementById('simCount').value;
+
+            btn.disabled = true;
+            loading.style.display = 'block';
+            results.style.display = 'none';
+
+            try {
+                const response = await fetch(`/api/cutline-draft/${draftId}/simulate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ num_simulations: parseInt(numSims) })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    displaySimResults(data.simulation_results);
+                } else {
+                    alert('Simulation error: ' + data.error);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Error running simulation');
+            } finally {
+                btn.disabled = false;
+                loading.style.display = 'none';
+            }
+        });
+
+        function displaySimResults(sim) {
+            document.getElementById('simResults').style.display = 'block';
+
+            document.getElementById('avgSeason').textContent = sim.mean_total_points?.toFixed(0) || '-';
+            document.getElementById('medianSeason').textContent = sim.percentile_50?.toFixed(0) || '-';
+            document.getElementById('weeklyAvg').textContent = sim.weekly_avg?.toFixed(1) || '-';
+            document.getElementById('ceiling').textContent = sim.percentile_90?.toFixed(0) || '-';
+            document.getElementById('floor').textContent = sim.percentile_10?.toFixed(0) || '-';
+
+            // Create charts if data available
+            if (sim.ceiling && sim.floor) {
+                createSeasonChart(sim);
+            }
+        }
+
+        function createSeasonChart(sim) {
+            const ctx = document.getElementById('seasonChart').getContext('2d');
+
+            if (seasonChart) seasonChart.destroy();
+
+            // Create distribution visualization
+            const mean = sim.mean_total_points;
+            const std = sim.std_dev || 100;
+
+            // Generate bell curve data points
+            const labels = [];
+            const data = [];
+            for (let i = mean - 3*std; i <= mean + 3*std; i += std/10) {
+                labels.push(Math.round(i));
+                const z = (i - mean) / std;
+                data.push(Math.exp(-0.5 * z * z) / (std * Math.sqrt(2 * Math.PI)));
+            }
+
+            seasonChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Probability',
+                        data: data,
+                        borderColor: '#dc143c',
+                        backgroundColor: 'rgba(220, 20, 60, 0.2)',
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            title: { display: true, text: 'Season Points', color: '#fff' },
+                            ticks: { color: '#b0bec5' },
+                            grid: { color: '#1e3a5f' }
+                        },
+                        y: {
+                            display: false
+                        }
+                    }
+                }
+            });
+        }
+    </script>
+</body>
+</html>
