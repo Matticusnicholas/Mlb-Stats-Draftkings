@@ -1090,12 +1090,55 @@ def simulate_cutline_season(draft_id):
 
     try:
         from src.analytics.draft_simulator import DraftSimulator
+        from src.database.models import Player
+        import unicodedata
 
         data = request.get_json() or {}
         num_sims = min(data.get('num_simulations', 500), 1000)
 
         # Get user roster
         roster = engine.export_roster_for_simulation()
+
+        # Build name-to-ID mapping from database
+        session = db.get_session()
+        all_players = session.query(Player).all()
+
+        def normalize_name(name):
+            name = name.lower().strip()
+            name = unicodedata.normalize('NFKD', name)
+            name = ''.join(c for c in name if not unicodedata.combining(c))
+            name = name.replace(' jr.', ' jr').replace(' sr.', ' sr')
+            name = name.replace('.', '').replace("'", '')
+            return ' '.join(name.split())
+
+        name_to_id = {}
+        for p in all_players:
+            name_key = normalize_name(p.player_name)
+            name_to_id[name_key] = p.player_id
+
+        # Resolve player IDs from names
+        resolved_roster = []
+        for p in roster:
+            name_key = normalize_name(p['player_name'])
+            real_id = name_to_id.get(name_key)
+            if real_id:
+                resolved_roster.append({
+                    'player_id': real_id,
+                    'player_name': p['player_name'],
+                    'position': p['position'],
+                    'team': p.get('team', ''),
+                    'stats_type': 'pitching' if p['position'] == 'P' else 'batting'
+                })
+
+        session.close()
+
+        if not resolved_roster:
+            return jsonify({
+                'success': False,
+                'error': 'No players found in database. Run data fetch first.'
+            }), 400
+
+        logger.info(f"Resolved {len(resolved_roster)}/{len(roster)} players for simulation")
 
         # Run simulation with Cutline scoring
         simulator = DraftSimulator(
@@ -1105,7 +1148,7 @@ def simulate_cutline_season(draft_id):
             weeks_in_season=26
         )
 
-        results = simulator.run_monte_carlo(roster)
+        results = simulator.run_monte_carlo(resolved_roster)
 
         return jsonify({
             'success': True,
