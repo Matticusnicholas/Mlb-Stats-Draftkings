@@ -418,11 +418,12 @@ class CutlineDraftEngine:
                 position = p.get('position', 'UTIL')
                 detailed_pos = self._get_detailed_position(p, position)
 
-                # Use EV rankings if available, otherwise estimate from ADP rank
-                ev_rank, bb_score = ev_rankings.get(player_id, (999, 0))
-                if bb_score == 0:
-                    # Estimate a modest score for ADP-only players
-                    bb_score = max(30.0 - (next_rank - 200) * 0.1, 20.0)
+                # Look up proprietary EV rank by normalized name
+                name_key = self._normalize_name(p['player_name'])
+                ev_rank = ev_rankings_by_name.get(name_key, 999)
+
+                # Estimate bestball score for ADP-only players
+                bb_score = max(30.0 - (next_rank - 200) * 0.1, 20.0)
 
                 player = CutlinePlayer(
                     rank=next_rank,
