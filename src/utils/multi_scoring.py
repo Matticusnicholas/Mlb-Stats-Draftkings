@@ -27,7 +27,8 @@ class MultiScoringCalculator:
         # Load each scoring system
         scoring_files = {
             'draftkings': 'dk_scoring.json',
-            'underdog': 'underdog_scoring.json'
+            'underdog': 'underdog_scoring.json',
+            'cutline': 'cutline_scoring.json'
         }
 
         for system_name, filename in scoring_files.items():
@@ -93,7 +94,7 @@ class MultiScoringCalculator:
 
         Args:
             player_game: PlayerGame object with batting stats
-            scoring_system: 'draftkings', 'underdog', or 'drafters'
+            scoring_system: 'draftkings', 'underdog', 'drafters', or 'cutline'
 
         Returns:
             Total fantasy points
@@ -104,17 +105,24 @@ class MultiScoringCalculator:
 
         s = self.scoring_systems[scoring_system]['batting']
 
-        # Calculate singles
-        singles = max(0, (player_game.hits or 0) - (player_game.doubles or 0) -
-                      (player_game.triples or 0) - (player_game.home_runs or 0))
-
         points = 0.0
 
-        # Hitting stats
-        points += singles * s.get('1B', 0)
-        points += (player_game.doubles or 0) * s.get('2B', 0)
-        points += (player_game.triples or 0) * s.get('3B', 0)
-        points += (player_game.home_runs or 0) * s.get('HR', 0)
+        # Cutline-style scoring: uses AB and total Hits (not broken down by type)
+        if s.get('AB') is not None:
+            # At bats penalty (Cutline: -1 per AB)
+            points += (player_game.at_bats or 0) * s.get('AB', 0)
+            # Total hits (Cutline: +4 per hit, all hits equal)
+            points += (player_game.hits or 0) * s.get('H', 0)
+            # Home run bonus (Cutline: +6 per HR, on top of hit value)
+            points += (player_game.home_runs or 0) * s.get('HR', 0)
+        else:
+            # Standard scoring: singles, doubles, triples, HR separately
+            singles = max(0, (player_game.hits or 0) - (player_game.doubles or 0) -
+                          (player_game.triples or 0) - (player_game.home_runs or 0))
+            points += singles * s.get('1B', 0)
+            points += (player_game.doubles or 0) * s.get('2B', 0)
+            points += (player_game.triples or 0) * s.get('3B', 0)
+            points += (player_game.home_runs or 0) * s.get('HR', 0)
 
         # Production stats
         points += (player_game.rbi or 0) * s.get('RBI', 0)
@@ -137,7 +145,7 @@ class MultiScoringCalculator:
 
         Args:
             player_game: PlayerGame object with pitching stats
-            scoring_system: 'draftkings', 'underdog', or 'drafters'
+            scoring_system: 'draftkings', 'underdog', 'drafters', or 'cutline'
 
         Returns:
             Total fantasy points
@@ -159,6 +167,9 @@ class MultiScoringCalculator:
 
         # Win
         points += (player_game.wins or 0) * s.get('W', 0)
+
+        # Save (Cutline specific)
+        points += (player_game.saves or 0) * s.get('SV', 0)
 
         # Quality Start (Underdog specific)
         if s.get('QS', 0) > 0:
