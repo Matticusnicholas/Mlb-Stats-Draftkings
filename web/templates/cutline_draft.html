@@ -658,7 +658,7 @@
     <!-- Setup Screen -->
     <div class="setup-screen" id="setupScreen">
         <h2>NFBC Cutline Championship Draft</h2>
-        <p style="color: #b0bec5; margin-bottom: 20px;">10-Team Snake Draft - 36 Rounds</p>
+        <p style="color: #b0bec5; margin-bottom: 20px;">10-Team Snake Draft - 42 Rounds</p>
 
         <div class="cutline-info">
             <h4>Cutline Scoring System</h4>
@@ -706,7 +706,7 @@
         <div class="draft-container">
             <!-- Left Panel - Your Roster -->
             <div class="roster-panel">
-                <div class="panel-header">Your Roster (0/36)</div>
+                <div class="panel-header">Your Roster (0/42)</div>
                 <div class="roster-needs" id="rosterNeeds">
                     <div class="need-item"><span class="pos">C</span> <span class="count">0/3</span></div>
                     <div class="need-item"><span class="pos">1B</span> <span class="count">0/3</span></div>
@@ -770,7 +770,7 @@
     <div class="draft-complete" id="draftComplete">
         <div class="complete-header">
             <h2>Cutline Draft Complete!</h2>
-            <p>Your 36-player roster is ready for simulation</p>
+            <p>Your 42-player roster is ready for simulation</p>
         </div>
 
         <div class="roster-grid">
@@ -1045,7 +1045,7 @@
 
             // Update panel header
             document.querySelector('.roster-panel .panel-header').textContent =
-                `Your Roster (${userRoster.length}/36)`;
+                `Your Roster (${userRoster.length}/42)`;
         }
 
         function renderUserRoster(state) {

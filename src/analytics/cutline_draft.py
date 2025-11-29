@@ -2,7 +2,7 @@
 NFBC Cutline Championship Draft Simulator.
 
 Simulates a 10-team snake draft for NFBC Cutline format with:
-- 36 roster spots per team
+- 42 roster spots per team (initial draft)
 - Detailed position requirements (C, 1B, 2B, 3B, SS, MI, CI, OF, UTIL, P)
 - Cutline-specific meta strategies
 - Integration with Monte Carlo season simulation
@@ -42,9 +42,9 @@ CUTLINE_LINEUP_SLOTS = {
 
 # Draft configuration
 CUTLINE_NUM_TEAMS = 10
-CUTLINE_ROSTER_SIZE = 36  # Initial draft roster
+CUTLINE_ROSTER_SIZE = 42  # Initial draft roster
 CUTLINE_MAX_ROSTER = 46   # After FAAB periods
-CUTLINE_NUM_ROUNDS = 36
+CUTLINE_NUM_ROUNDS = 42
 
 
 class CutlinePosition(Enum):
@@ -179,16 +179,16 @@ class CutlineTeam:
         """Calculate remaining roster needs for optimal lineup."""
         counts = self.get_position_counts()
 
-        # Target roster composition for 36 players:
+        # Target roster composition for 42 players:
         # Need depth at every position for best ball weekly optimization
         targets = {
-            'C': 3,    # 2 start, need depth for 162 games
+            'C': 4,    # 2 start, need depth for 162 games
             '1B': 3,   # 1 start + CI eligible
-            '2B': 3,   # 1 start + MI eligible
+            '2B': 4,   # 1 start + MI eligible
             '3B': 3,   # 1 start + CI eligible
-            'SS': 3,   # 1 start + MI eligible
-            'OF': 8,   # 5 start, most scarce
-            'P': 12,   # 9 start, need SP depth + closers
+            'SS': 4,   # 1 start + MI eligible
+            'OF': 9,   # 5 start, most scarce
+            'P': 14,   # 9 start, need SP depth + closers
             'UTIL': 1, # DH types
         }
 
