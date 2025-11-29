@@ -324,28 +324,32 @@ class CutlineDraftEngine:
         logger.info(f"Cutline draft initialized: User at position {user_position}")
 
     def _load_rankings(self):
-        """Load player rankings with detailed positions."""
-        # Try loading from multiple sources
+        """Load player rankings with detailed positions.
+
+        Merges Cutline-specific rankings with ADP fallback to ensure
+        enough players for a complete draft (420+ for 10 teams x 42 rounds).
+        """
         data_dir = Path(__file__).parent.parent.parent / 'data'
-        cache_dir = Path(__file__).parent.parent.parent / 'web' / 'cache'
 
-        # Priority: cutline_rankings > nfbc_rankings > adp_rankings
-        rankings_sources = [
-            data_dir / 'cutline_rankings.json',
-            data_dir / 'nfbc_rankings.json',
-            data_dir / 'adp_rankings_2025.json',
-        ]
+        # Load primary Cutline rankings (has Cutline-specific bestball_score)
+        cutline_path = data_dir / 'cutline_rankings.json'
+        adp_path = data_dir / 'adp_rankings_2025.json'
 
-        rankings_data = None
-        for source in rankings_sources:
-            if source.exists():
-                with open(source, 'r') as f:
-                    rankings_data = json.load(f)
-                    logger.info(f"Loaded rankings from {source.name}")
-                    break
+        cutline_data = None
+        adp_data = None
 
-        if not rankings_data:
-            raise FileNotFoundError("No rankings file found")
+        if cutline_path.exists():
+            with open(cutline_path, 'r') as f:
+                cutline_data = json.load(f)
+                logger.info(f"Loaded {len(cutline_data.get('rankings', []))} Cutline rankings")
+
+        if adp_path.exists():
+            with open(adp_path, 'r') as f:
+                adp_data = json.load(f)
+                logger.info(f"Loaded {len(adp_data.get('rankings', []))} ADP rankings as fallback")
+
+        if not cutline_data and not adp_data:
+            raise FileNotFoundError("No rankings files found")
 
         # Load EV rankings from persistent file
         ev_rankings = {}
@@ -359,25 +363,69 @@ class CutlineDraftEngine:
                         p.get('bestball_score', 0)
                     )
 
-        # Convert to CutlinePlayer objects
+        # Build player list - Cutline rankings first, then ADP fallback
         self.available_players = []
-        for p in rankings_data.get('rankings', []):
-            # Map simplified positions to detailed
-            position = p.get('position', 'UTIL')
-            detailed_pos = self._get_detailed_position(p, position)
+        seen_player_ids = set()
+        seen_player_names = set()
 
-            player = CutlinePlayer(
-                rank=p['rank'],
-                player_id=p.get('db_player_id', p.get('player_id', 0)),
-                player_name=p['player_name'],
-                position=detailed_pos,
-                team=p.get('team', ''),
-                ev_rank=ev_rankings.get(p.get('db_player_id', 0), (999, 0))[0],
-                bestball_score=ev_rankings.get(p.get('db_player_id', 0), (999, 0))[1],
-            )
-            self.available_players.append(player)
+        # Process Cutline rankings first (these have Cutline-specific scores)
+        if cutline_data:
+            for p in cutline_data.get('rankings', []):
+                position = p.get('position', 'UTIL')
+                detailed_pos = self._get_detailed_position(p, position)
+                player_id = p.get('db_player_id', p.get('player_id', 0))
 
-        logger.info(f"Loaded {len(self.available_players)} players for Cutline draft")
+                # Use Cutline bestball_score directly from the rankings
+                cutline_score = p.get('bestball_score', 0)
+
+                player = CutlinePlayer(
+                    rank=p['rank'],
+                    player_id=player_id,
+                    player_name=p['player_name'],
+                    position=detailed_pos,
+                    team=p.get('team', ''),
+                    ev_rank=p['rank'],  # Use Cutline rank as EV rank
+                    bestball_score=cutline_score,
+                )
+                self.available_players.append(player)
+                seen_player_ids.add(player_id)
+                seen_player_names.add(p['player_name'].lower())
+
+        # Add ADP players not in Cutline rankings (for draft depth)
+        if adp_data:
+            next_rank = len(self.available_players) + 1
+            for p in adp_data.get('rankings', []):
+                player_id = p.get('db_player_id', p.get('player_id', 0))
+                player_name = p['player_name'].lower()
+
+                # Skip if already have this player
+                if player_id in seen_player_ids or player_name in seen_player_names:
+                    continue
+
+                position = p.get('position', 'UTIL')
+                detailed_pos = self._get_detailed_position(p, position)
+
+                # Use EV rankings if available, otherwise estimate from ADP rank
+                ev_rank, bb_score = ev_rankings.get(player_id, (999, 0))
+                if bb_score == 0:
+                    # Estimate a modest score for ADP-only players
+                    bb_score = max(30.0 - (next_rank - 200) * 0.1, 20.0)
+
+                player = CutlinePlayer(
+                    rank=next_rank,
+                    player_id=player_id,
+                    player_name=p['player_name'],
+                    position=detailed_pos,
+                    team=p.get('team', ''),
+                    ev_rank=ev_rank if ev_rank != 999 else next_rank + 200,
+                    bestball_score=bb_score,
+                )
+                self.available_players.append(player)
+                seen_player_ids.add(player_id)
+                seen_player_names.add(player_name)
+                next_rank += 1
+
+        logger.info(f"Loaded {len(self.available_players)} total players for Cutline draft")
 
     def _get_detailed_position(self, player_data: dict, simplified_pos: str) -> str:
         """
