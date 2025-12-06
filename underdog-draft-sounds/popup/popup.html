@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Underdog Draft Sounds</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Draft Sounds</h1>
+      <label class="master-toggle">
+        <input type="checkbox" id="enabled" checked>
+        <span class="toggle-slider"></span>
+      </label>
+    </header>
+
+    <section class="volume-section">
+      <label for="volume">Volume</label>
+      <div class="volume-control">
+        <input type="range" id="volume" min="0" max="100" value="70">
+        <span id="volume-display">70%</span>
+      </div>
+    </section>
+
+    <section class="sounds-section">
+      <h2>Sound Notifications</h2>
+
+      <div class="sound-option">
+        <div class="sound-info">
+          <span class="sound-name">Your Turn</span>
+          <span class="sound-desc">Alert when it's your pick</span>
+        </div>
+        <div class="sound-controls">
+          <button class="test-btn" data-sound="myTurn" title="Test sound">
+            <svg viewBox="0 0 24 24" width="16" height="16">
+              <path fill="currentColor" d="M8 5v14l11-7z"/>
+            </svg>
+          </button>
+          <label class="toggle">
+            <input type="checkbox" data-sound="myTurn" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="sound-option">
+        <div class="sound-info">
+          <span class="sound-name">Other Picks</span>
+          <span class="sound-desc">Sound when others pick</span>
+        </div>
+        <div class="sound-controls">
+          <button class="test-btn" data-sound="otherPick" title="Test sound">
+            <svg viewBox="0 0 24 24" width="16" height="16">
+              <path fill="currentColor" d="M8 5v14l11-7z"/>
+            </svg>
+          </button>
+          <label class="toggle">
+            <input type="checkbox" data-sound="otherPick" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="sound-option">
+        <div class="sound-info">
+          <span class="sound-name">Player Joins</span>
+          <span class="sound-desc">Lobby join notification</span>
+        </div>
+        <div class="sound-controls">
+          <button class="test-btn" data-sound="playerJoin" title="Test sound">
+            <svg viewBox="0 0 24 24" width="16" height="16">
+              <path fill="currentColor" d="M8 5v14l11-7z"/>
+            </svg>
+          </button>
+          <label class="toggle">
+            <input type="checkbox" data-sound="playerJoin" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="sound-option">
+        <div class="sound-info">
+          <span class="sound-name">Player Leaves</span>
+          <span class="sound-desc">Lobby leave notification</span>
+        </div>
+        <div class="sound-controls">
+          <button class="test-btn" data-sound="playerLeave" title="Test sound">
+            <svg viewBox="0 0 24 24" width="16" height="16">
+              <path fill="currentColor" d="M8 5v14l11-7z"/>
+            </svg>
+          </button>
+          <label class="toggle">
+            <input type="checkbox" data-sound="playerLeave" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="sound-option">
+        <div class="sound-info">
+          <span class="sound-name">Draft Starts</span>
+          <span class="sound-desc">Draft beginning alert</span>
+        </div>
+        <div class="sound-controls">
+          <button class="test-btn" data-sound="draftStart" title="Test sound">
+            <svg viewBox="0 0 24 24" width="16" height="16">
+              <path fill="currentColor" d="M8 5v14l11-7z"/>
+            </svg>
+          </button>
+          <label class="toggle">
+            <input type="checkbox" data-sound="draftStart" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      <p class="status" id="status">Ready</p>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
