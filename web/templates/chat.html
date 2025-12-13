@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MLB Best Ball Assistant - AI Chat</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <style>
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            height: calc(100vh - 200px);
+            min-height: 500px;
+            background: var(--card-background);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .chat-header {
+            background: linear-gradient(135deg, #1a5f7a 0%, #0a2e3b 100%);
+            padding: 15px 20px;
+            color: white;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .chat-header .avatar {
+            width: 50px;
+            height: 50px;
+            background: #fff;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+        }
+
+        .chat-header h2 {
+            margin: 0;
+            font-size: 1.3rem;
+        }
+
+        .chat-header p {
+            margin: 5px 0 0 0;
+            font-size: 0.85rem;
+            opacity: 0.9;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .message {
+            max-width: 80%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            line-height: 1.5;
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .message.user {
+            background: var(--primary-color);
+            color: white;
+            align-self: flex-end;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.assistant {
+            background: #2a2a40;
+            color: #e0e0e0;
+            align-self: flex-start;
+            border-bottom-left-radius: 4px;
+        }
+
+        .message.system {
+            background: #3a3a50;
+            color: #888;
+            align-self: center;
+            font-size: 0.85rem;
+            padding: 8px 16px;
+        }
+
+        .chat-input-container {
+            padding: 15px 20px;
+            background: #1a1a2e;
+            border-top: 1px solid #333;
+            display: flex;
+            gap: 10px;
+        }
+
+        .chat-input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 1px solid #444;
+            border-radius: 24px;
+            background: #2a2a40;
+            color: white;
+            font-size: 1rem;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+
+        .chat-input:focus {
+            border-color: var(--primary-color);
+        }
+
+        .chat-input::placeholder {
+            color: #666;
+        }
+
+        .send-btn {
+            padding: 12px 24px;
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 24px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .send-btn:hover {
+            background: #1e7e9e;
+        }
+
+        .send-btn:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+
+        .clear-btn {
+            padding: 12px 16px;
+            background: #444;
+            color: #aaa;
+            border: none;
+            border-radius: 24px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .clear-btn:hover {
+            background: #555;
+        }
+
+        .typing-indicator {
+            display: flex;
+            gap: 4px;
+            padding: 12px 16px;
+            background: #2a2a40;
+            border-radius: 12px;
+            align-self: flex-start;
+            border-bottom-left-radius: 4px;
+        }
+
+        .typing-indicator span {
+            width: 8px;
+            height: 8px;
+            background: #666;
+            border-radius: 50%;
+            animation: typing 1s infinite;
+        }
+
+        .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes typing {
+            0%, 100% { opacity: 0.3; transform: translateY(0); }
+            50% { opacity: 1; transform: translateY(-4px); }
+        }
+
+        .quick-prompts {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 10px 20px;
+            background: #1a1a2e;
+            border-bottom: 1px solid #333;
+        }
+
+        .quick-prompt {
+            padding: 6px 12px;
+            background: #2a2a40;
+            border: 1px solid #444;
+            border-radius: 16px;
+            color: #aaa;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .quick-prompt:hover {
+            background: #3a3a50;
+            border-color: var(--primary-color);
+            color: white;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .status-badge.online {
+            background: #2e7d32;
+            color: white;
+        }
+
+        .status-badge.fallback {
+            background: #f57c00;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>MLB Best Ball Analyzer</h1>
+            <p class="subtitle">AI-Powered Draft Assistant</p>
+        </header>
+
+        <!-- Navigation -->
+        <nav style="display: flex; gap: 15px; margin-bottom: 20px;">
+            <a href="/" style="color: var(--primary-color); background: var(--card-background); text-decoration: none; padding: 10px 20px; border-radius: 5px; font-weight: 600;">Rankings</a>
+            <a href="/draft" style="color: var(--primary-color); background: var(--card-background); text-decoration: none; padding: 10px 20px; border-radius: 5px; font-weight: 600;">Draft Simulator</a>
+            <a href="/mock-draft" style="color: var(--primary-color); background: var(--card-background); text-decoration: none; padding: 10px 20px; border-radius: 5px; font-weight: 600;">Mock Draft</a>
+            <a href="/cutline-draft" style="color: white; background: #8b0000; text-decoration: none; padding: 10px 20px; border-radius: 5px; font-weight: 600;">Cutline Draft</a>
+            <a href="/chat" style="color: white; background: var(--primary-color); text-decoration: none; padding: 10px 20px; border-radius: 5px; font-weight: 600;">AI Assistant</a>
+        </nav>
+
+        <!-- Chat Container -->
+        <div class="chat-container">
+            <div class="chat-header">
+                <div class="avatar">&#9918;</div>
+                <div>
+                    <h2>MLB Best Ball Assistant</h2>
+                    <p>Expert advice on Cutline scoring, draft strategy, and player rankings</p>
+                </div>
+                <span id="status-badge" class="status-badge fallback">Fallback Mode</span>
+            </div>
+
+            <div class="quick-prompts">
+                <button class="quick-prompt" data-prompt="How does Cutline scoring work?">Cutline Scoring</button>
+                <button class="quick-prompt" data-prompt="What is the best draft strategy for Cutline?">Draft Strategy</button>
+                <button class="quick-prompt" data-prompt="How many pitchers should I draft?">Pitchers to Draft</button>
+                <button class="quick-prompt" data-prompt="Why are saves so valuable in Cutline?">Save Value</button>
+                <button class="quick-prompt" data-prompt="How should I approach catcher in Cutline drafts?">Catcher Strategy</button>
+                <button class="quick-prompt" data-prompt="What are spike weeks in best ball?">Spike Weeks</button>
+            </div>
+
+            <div id="chat-messages" class="chat-messages">
+                <div class="message system">
+                    Welcome! Ask me anything about MLB best ball strategy, Cutline scoring, or player analysis.
+                </div>
+            </div>
+
+            <div class="chat-input-container">
+                <input type="text" id="chat-input" class="chat-input" placeholder="Ask about draft strategy, scoring rules, player rankings..." autocomplete="off">
+                <button id="send-btn" class="send-btn">Send</button>
+                <button id="clear-btn" class="clear-btn" title="Clear chat">Clear</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const messagesContainer = document.getElementById('chat-messages');
+        const chatInput = document.getElementById('chat-input');
+        const sendBtn = document.getElementById('send-btn');
+        const clearBtn = document.getElementById('clear-btn');
+        const statusBadge = document.getElementById('status-badge');
+
+        let sessionId = 'session_' + Date.now();
+        let isWaiting = false;
+
+        function addMessage(text, type) {
+            const msg = document.createElement('div');
+            msg.className = `message ${type}`;
+            msg.textContent = text;
+            messagesContainer.appendChild(msg);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        function addTypingIndicator() {
+            const indicator = document.createElement('div');
+            indicator.className = 'typing-indicator';
+            indicator.id = 'typing';
+            indicator.innerHTML = '<span></span><span></span><span></span>';
+            messagesContainer.appendChild(indicator);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        function removeTypingIndicator() {
+            const indicator = document.getElementById('typing');
+            if (indicator) indicator.remove();
+        }
+
+        async function sendMessage() {
+            const message = chatInput.value.trim();
+            if (!message || isWaiting) return;
+
+            addMessage(message, 'user');
+            chatInput.value = '';
+            isWaiting = true;
+            sendBtn.disabled = true;
+
+            addTypingIndicator();
+
+            try {
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message, session_id: sessionId })
+                });
+
+                const data = await response.json();
+                removeTypingIndicator();
+
+                if (data.success) {
+                    addMessage(data.response, 'assistant');
+
+                    // Update status badge based on response length (heuristic for LLM vs fallback)
+                    if (data.response.length > 300) {
+                        statusBadge.textContent = 'LLM Active';
+                        statusBadge.className = 'status-badge online';
+                    }
+                } else {
+                    addMessage('Error: ' + data.error, 'system');
+                }
+            } catch (error) {
+                removeTypingIndicator();
+                addMessage('Connection error. Please try again.', 'system');
+            }
+
+            isWaiting = false;
+            sendBtn.disabled = false;
+            chatInput.focus();
+        }
+
+        async function clearChat() {
+            try {
+                await fetch('/api/chat/clear', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: sessionId })
+                });
+            } catch (e) {}
+
+            messagesContainer.innerHTML = '';
+            addMessage('Chat cleared. Ask me anything about MLB best ball!', 'system');
+            sessionId = 'session_' + Date.now();
+        }
+
+        // Event listeners
+        sendBtn.addEventListener('click', sendMessage);
+        clearBtn.addEventListener('click', clearChat);
+
+        chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        // Quick prompts
+        document.querySelectorAll('.quick-prompt').forEach(btn => {
+            btn.addEventListener('click', () => {
+                chatInput.value = btn.dataset.prompt;
+                sendMessage();
+            });
+        });
+
+        // Focus input on load
+        chatInput.focus();
+    </script>
+</body>
+</html>

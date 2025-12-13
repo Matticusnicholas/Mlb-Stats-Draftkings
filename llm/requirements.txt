@@ -1,0 +1,39 @@
+# LLM Fine-tuning Requirements for 4070 Ti Super 16GB
+# Install with: pip install -r requirements.txt
+
+# Core ML
+torch>=2.1.0
+torchvision
+torchaudio
+
+# Transformers & Fine-tuning
+transformers>=4.36.0
+accelerate>=0.25.0
+peft>=0.7.0
+bitsandbytes>=0.41.0
+trl>=0.7.0
+
+# Dataset handling
+datasets>=2.15.0
+
+# Quantization
+auto-gptq>=0.5.0
+
+# Inference
+einops
+sentencepiece
+protobuf
+
+# For data preparation
+pandas
+numpy
+jsonlines
+
+# Progress bars
+tqdm
+
+# Weights & Biases (optional, for tracking training)
+# wandb
+
+# Flash Attention 2 (optional, faster training)
+# flash-attn>=2.3.0

@@ -1206,5 +1206,139 @@ def get_cutline_all_rosters(draft_id):
     })
 
 
+# ============================================================================
+# LLM Chat Integration
+# ============================================================================
+
+# Store chat sessions
+_chat_sessions = {}
+_llm_instance = None
+
+
+def get_llm():
+    """Lazy load the LLM instance."""
+    global _llm_instance
+    if _llm_instance is None:
+        try:
+            import sys
+            llm_scripts_path = os.path.join(os.path.dirname(__file__), '..', 'llm', 'scripts')
+            if llm_scripts_path not in sys.path:
+                sys.path.insert(0, llm_scripts_path)
+            from inference import MLBBestBallLLM
+            _llm_instance = MLBBestBallLLM()
+        except ImportError as e:
+            logger.warning(f"LLM not available: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Error loading LLM: {e}")
+            return None
+    return _llm_instance
+
+
+@app.route('/chat')
+def chat_page():
+    """Render chat assistant page."""
+    return render_template('chat.html')
+
+
+@app.route('/api/chat', methods=['POST'])
+def chat_api():
+    """
+    Chat with MLB Best Ball AI assistant.
+
+    POST body:
+        message: User's question
+        session_id: Optional session ID for conversation context
+    """
+    try:
+        data = request.get_json()
+        message = data.get('message', '').strip()
+        session_id = data.get('session_id', 'default')
+
+        if not message:
+            return jsonify({'success': False, 'error': 'No message provided'}), 400
+
+        # Get or create chat history
+        if session_id not in _chat_sessions:
+            _chat_sessions[session_id] = []
+
+        history = _chat_sessions[session_id]
+
+        # Try to use fine-tuned LLM
+        llm = get_llm()
+
+        if llm:
+            response = llm.chat(message, history)
+        else:
+            # Fallback response if LLM not available
+            response = get_fallback_response(message)
+
+        # Store in history
+        history.append((message, response))
+
+        # Keep only last 10 exchanges
+        if len(history) > 10:
+            _chat_sessions[session_id] = history[-10:]
+
+        return jsonify({
+            'success': True,
+            'response': response,
+            'session_id': session_id
+        })
+
+    except Exception as e:
+        logger.error(f"Chat error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/chat/clear', methods=['POST'])
+def clear_chat():
+    """Clear chat history for a session."""
+    data = request.get_json() or {}
+    session_id = data.get('session_id', 'default')
+
+    if session_id in _chat_sessions:
+        _chat_sessions[session_id] = []
+
+    return jsonify({'success': True})
+
+
+def get_fallback_response(message):
+    """Provide basic responses when LLM is not available."""
+    msg_lower = message.lower()
+
+    # Basic keyword matching for common questions
+    if 'scoring' in msg_lower or 'points' in msg_lower:
+        if 'hitter' in msg_lower or 'batter' in msg_lower:
+            return "Cutline hitter scoring: -1 per AB, +4 per Hit, +6 per HR, +2 per Run, +2 per RBI, +5 per SB. Contact + power + speed is the ideal profile."
+        elif 'pitcher' in msg_lower:
+            return "Cutline pitcher scoring: +3 per IP, -1 per Hit, -2 per ER, -1 per BB, +1 per K, +6 per Win, +8 per Save. Saves are huge at +8!"
+        else:
+            return "Cutline scoring: Hitters get -1/AB, +4/H, +6/HR, +2/R, +2/RBI, +5/SB. Pitchers get +3/IP, -1/H, -2/ER, -1/BB, +1/K, +6/W, +8/SV."
+
+    elif 'save' in msg_lower or 'closer' in msg_lower:
+        return "Saves are worth +8 points in Cutline - the highest in the industry! Elite closers like Emmanuel Clase or Edwin Diaz are extremely valuable."
+
+    elif 'draft' in msg_lower and 'strategy' in msg_lower:
+        return "Stack hitters early, pitchers late. Target 28-32 batters and 10-14 pitchers. Lock up an elite catcher in rounds 2-5. Let pitchers fall to you."
+
+    elif 'catcher' in msg_lower:
+        return "You need 2 catchers daily in Cutline, making C a premium position. Get one elite catcher (Cal Raleigh, William Contreras tier) in rounds 2-5, then grab 2-3 depth options."
+
+    elif 'pitcher' in msg_lower and ('how many' in msg_lower or 'draft' in msg_lower):
+        return "Draft 10-14 pitchers. Focus on innings eaters and elite closers. Batters dominate Cutline scoring, so don't overdraft arms."
+
+    elif 'spike' in msg_lower or 'ceiling' in msg_lower:
+        return "Best ball is about ceiling, not floor! A player scoring 20/20/20/80 beats 35/35/35/35 because best ball picks your top scores. Draft volatile, high-upside players."
+
+    elif 'value' in msg_lower or 'ev' in msg_lower:
+        return "Compare EV rank to Cutline consensus rank to find value. When your EV rank is significantly lower than consensus, that player is undervalued."
+
+    else:
+        return "I'm the MLB Best Ball Assistant! Ask me about Cutline scoring rules, draft strategy, player rankings, or roster construction. Note: The full LLM is not loaded - run the fine-tuning pipeline for enhanced responses."
+
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
