@@ -891,16 +891,17 @@ class WeeklyAnalyzer:
         gini_score = min(100, max(0, (gini - 0.3) * 250))  # 0.3->0, 0.7->100
 
         # Weighted combination
-        # Gini replaces some weight from non-persistent metrics (TEAR3, boom)
+        # Gini (25%) is the co-dominant signal with USEFUL PPW (25%).
+        # TEAR3 dropped entirely (not persistent after talent adjustment).
+        # Boom reduced to 5% (raw talent signal only, not persistent streakiness).
         bestball_score = (
             useful_concentration * 0.25 +    # Pts per useful week (when good, how good?)
+            gini_score * 0.25 +              # GINI - burst compression (most persistent metric)
             useful_frequency * 0.15 +        # % of weeks that are starting-worthy
-            boom_score * 0.10 +              # Elite week frequency
-            tear_score * 0.05 +              # Multi-game hot streak ability (low persistence)
             iv_score * 0.10 +                # IMPLIED VOLATILITY - normalized explosiveness
-            gini_score * 0.15 +              # GINI - point compression (persistent streakiness)
             top3_score * 0.10 +              # Typical ceiling weeks
-            concentration_score * 0.10       # General spike-iness
+            concentration_score * 0.10 +     # General spike-iness
+            boom_score * 0.05                # Elite week frequency (talent signal only)
         )
 
         return round(bestball_score, 2)
