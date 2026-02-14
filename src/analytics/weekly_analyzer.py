@@ -441,6 +441,28 @@ class WeeklyAnalyzer:
         cv = metrics['std_week_points'] / metrics['mean_week_points'] if metrics['mean_week_points'] > 0 else 0
         metrics['weekly_cv'] = float(cv)
 
+        # GINI COEFFICIENT - Game-level point inequality
+        # Measures how unevenly a player distributes points across games.
+        # Higher Gini = more production compressed into fewer games = burst player.
+        # This is the most persistent streakiness metric after talent adjustment (r~0.30).
+        game_points = self._get_game_points(player_id, stats_type)
+        if len(game_points) >= 5:
+            sorted_abs = np.sort(np.abs(game_points))
+            n = len(sorted_abs)
+            index = np.arange(1, n + 1)
+            total = np.sum(sorted_abs)
+            if total > 0:
+                gini = float((2 * np.sum(index * sorted_abs) - (n + 1) * total) / (n * total))
+            else:
+                gini = 0.0
+            metrics['gini_coefficient'] = gini
+            # Game-level CV (std/mean at per-game level, not weekly)
+            game_mean = np.mean(game_points)
+            metrics['game_cv'] = float(np.std(game_points, ddof=1) / game_mean) if game_mean > 0 else 0.0
+        else:
+            metrics['gini_coefficient'] = 0.0
+            metrics['game_cv'] = 0.0
+
         # IMPLIED VOLATILITY (IV) - Options-inspired metric
         # Measures how explosive a player is relative to league average
         # IV = player's weekly std dev / league median weekly std dev
@@ -721,6 +743,22 @@ class WeeklyAnalyzer:
         finally:
             session.close()
 
+    def _get_game_points(self, player_id: int, stats_type: str) -> np.ndarray:
+        """
+        Get game-level points for a player (already date-ordered by db query).
+
+        Args:
+            player_id: MLB player ID
+            stats_type: 'batting' or 'pitching'
+
+        Returns:
+            numpy array of points per game
+        """
+        player_games = self.db.get_player_games(player_id, stats_type)
+        if not player_games:
+            return np.array([])
+        return np.array([self._get_points(pg) for pg in player_games])
+
     def _get_league_median_volatility(self, stats_type: str = "batting", min_games: int = 20) -> float:
         """
         Calculate league-wide median weekly volatility (standard deviation).
@@ -845,18 +883,24 @@ class WeeklyAnalyzer:
         # Top 5 weeks concentration (spike-iness)
         concentration_score = min(100, metrics['top5_weeks_pct'])
 
-        # Weighted combination - USEFUL and IV dominate
-        # Removed best_week_score entirely (was 5%)
-        # Reduced top3_score from 10% to 5%
-        # Added IV at 10% (captures explosiveness better than best_week)
+        # GINI COEFFICIENT - Point compression / burst tendency
+        # Persistent streakiness metric (talent-adjusted r~0.30 for batters)
+        # Gini ranges 0-1; typical draftable hitters: 0.35-0.65
+        # Scale: 0.3 = 0, 0.5 = 50, 0.7 = 100
+        gini = metrics.get('gini_coefficient', 0.0)
+        gini_score = min(100, max(0, (gini - 0.3) * 250))  # 0.3->0, 0.7->100
+
+        # Weighted combination
+        # Gini replaces some weight from non-persistent metrics (TEAR3, boom)
         bestball_score = (
             useful_concentration * 0.25 +    # Pts per useful week (when good, how good?)
-            useful_frequency * 0.20 +        # % of weeks that are starting-worthy
-            boom_score * 0.20 +              # Elite week frequency
-            tear_score * 0.15 +              # Multi-game hot streak ability
-            iv_score * 0.10 +                # IMPLIED VOLATILITY - normalized explosiveness (NEW!)
-            top3_score * 0.05 +              # Typical ceiling weeks (reduced from 10%)
-            concentration_score * 0.05       # General spike-iness
+            useful_frequency * 0.15 +        # % of weeks that are starting-worthy
+            boom_score * 0.10 +              # Elite week frequency
+            tear_score * 0.05 +              # Multi-game hot streak ability (low persistence)
+            iv_score * 0.10 +                # IMPLIED VOLATILITY - normalized explosiveness
+            gini_score * 0.15 +              # GINI - point compression (persistent streakiness)
+            top3_score * 0.10 +              # Typical ceiling weeks
+            concentration_score * 0.10       # General spike-iness
         )
 
         return round(bestball_score, 2)
