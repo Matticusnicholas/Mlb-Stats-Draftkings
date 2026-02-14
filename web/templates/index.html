@@ -73,15 +73,16 @@
         <div class="info-box">
             <h3>Best Ball Metrics Explained:</h3>
             <ul>
-                <li><strong>BB Score:</strong> Composite 0-100 metric combining best week, consistency, and TEAR ability</li>
+                <li><strong>BB Score:</strong> Composite 0-100 metric: USEFUL Pts/Wk (25%) + Gini (25%) + USEFUL Wk% (15%) + IV (10%) + Top 3 Avg (10%) + Top 5% (10%) + Boom (5%)</li>
+                <li><strong>Gini:</strong> Point compression coefficient (0-1). Higher = more unequal point distribution = spikier weeks. The MOST persistent volatility metric across seasons.</li>
+                <li><strong>IV (Implied Volatility):</strong> Weekly explosiveness vs league average (1.0 = normal, 1.35+ = High-IV, 1.60+ = Gamma, 2.0+ = Nuclear)</li>
+                <li><strong>Tier:</strong> IV classification - Nuclear (2.0+) > Gamma (1.60+) > High-IV (1.35+) > Normal (1.0) > Low-Vol (<1.0)</li>
                 <li><strong>Useful Pts:</strong> Total points from starting-worthy weeks (70th %ile threshold)</li>
                 <li><strong>Useful Wks:</strong> Count of weeks above starting threshold</li>
                 <li><strong>Pts/Wk:</strong> Average points per useful week (concentration metric - higher = more explosive)</li>
-                <li><strong>IV (Implied Volatility):</strong> Weekly explosiveness vs league average (1.0 = normal, 1.35+ = High-IV, 1.60+ = Gamma, 2.0+ = Nuclear)</li>
-                <li><strong>Tier:</strong> IV classification - Nuclear (2.0+) > Gamma (1.60+) > High-IV (1.35+) > Normal (1.0) > Low-Vol (<1.0)</li>
                 <li><strong>Best Week:</strong> Highest 7-day rolling window points total</li>
                 <li><strong>Boom%:</strong> Percentage of weeks scoring 90th percentile or higher</li>
-                <li><strong>TEAR3/TEAR4:</strong> Multi-game hot streaks (3+ or 4+ consecutive elite games)</li>
+                <li><strong>TEAR3:</strong> Multi-game hot streaks (3+ consecutive elite games per 100)</li>
                 <li id="workhorse-info" style="display:none;"><strong>Workhorse Score:</strong> Innings-eating reliability (0-100): durability, IP/start, quality starts</li>
                 <li id="workhorse-qs" style="display:none;"><strong>QS Rate:</strong> Percentage of starts with 6+ IP (quality starts)</li>
             </ul>

@@ -151,15 +151,15 @@
             </div>
 
             <div class="metric-card">
-                <h3>Boom Week Rate</h3>
-                <div class="value">{{ "%.1f"|format(metrics.boom_week_rate) }}%</div>
-                <div class="label">90th percentile+ weeks</div>
+                <h3>Gini Coefficient</h3>
+                <div class="value">{{ "%.3f"|format(metrics.gini_coefficient) }}</div>
+                <div class="label">Point compression (higher = spikier, most persistent metric)</div>
             </div>
 
             <div class="metric-card">
-                <h3>TEAR Streaks</h3>
-                <div class="value">{{ "%.1f"|format(metrics.tear3_rate) }}</div>
-                <div class="label">3+ game hot streaks per 100</div>
+                <h3>Boom Week Rate</h3>
+                <div class="value">{{ "%.1f"|format(metrics.boom_week_rate) }}%</div>
+                <div class="label">90th percentile+ weeks</div>
             </div>
         </div>
 

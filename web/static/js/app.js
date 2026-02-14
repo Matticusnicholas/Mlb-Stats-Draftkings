@@ -87,6 +87,7 @@ function updateTableHeaders() {
         ${isCombined ? '<th class="sortable" data-sort="player_type">Pos</th>' : ''}
         <th class="sortable" data-sort="player_name">Player Name</th>
         <th class="sortable" data-sort="bestball_score">BB Score</th>
+        <th class="sortable" data-sort="gini_coefficient" title="Gini Coefficient: point compression / burst tendency (0-1, higher = spikier)">Gini</th>
         <th class="sortable" data-sort="implied_volatility" title="Implied Volatility: player weekly σ / league median σ">IV</th>
         <th class="sortable" data-sort="iv_tier" title="IV Tier: Nuclear/Gamma/High-IV/Normal/Low-Vol">Tier</th>
         <th class="sortable" data-sort="useful_points_total">Useful Pts</th>
@@ -95,7 +96,6 @@ function updateTableHeaders() {
         <th class="sortable" data-sort="best_week">Best Week</th>
         <th class="sortable" data-sort="boom_week_rate">Boom%</th>
         <th class="sortable" data-sort="tear3_rate">TEAR3</th>
-        <th class="sortable" data-sort="tear4_rate">TEAR4</th>
     `;
 
     // Add workhorse columns for pitchers
@@ -233,26 +233,30 @@ function renderTable() {
         // Base stats with percentile bars
         const baseStats = [
             { key: 'bestball_score', decimals: 1 },
-            { key: 'implied_volatility', decimals: 2 },  // NEW: IV metric
+            { key: 'gini_coefficient', decimals: 3 },  // Gini: burst compression (most persistent metric)
+            { key: 'implied_volatility', decimals: 2 },  // IV metric
             // iv_tier handled separately below (not a number)
             { key: 'useful_points_total', decimals: 1 },
             { key: 'useful_weeks_count', decimals: 0 },
             { key: 'useful_points_per_week', decimals: 1 },
             { key: 'best_week', decimals: 1 },
             { key: 'boom_week_rate', decimals: 1 },
-            { key: 'tear3_rate', decimals: 1 },
-            { key: 'tear4_rate', decimals: 1 }
+            { key: 'tear3_rate', decimals: 1 }
         ];
 
         // First stat: BB Score
         const bbScoreCell = createStatCell(player, baseStats[0].key, baseStats[0].decimals);
         row.appendChild(bbScoreCell);
 
-        // Second stat: IV
-        const ivCell = createStatCell(player, baseStats[1].key, baseStats[1].decimals);
+        // Second stat: Gini
+        const giniCell = createStatCell(player, baseStats[1].key, baseStats[1].decimals);
+        row.appendChild(giniCell);
+
+        // Third stat: IV
+        const ivCell = createStatCell(player, baseStats[2].key, baseStats[2].decimals);
         row.appendChild(ivCell);
 
-        // Third: IV Tier (text, not number)
+        // Fourth: IV Tier (text, not number)
         const tierCell = document.createElement('td');
         const tier = player.iv_tier || 'N/A';
         tierCell.textContent = tier;
@@ -272,8 +276,8 @@ function renderTable() {
         }
         row.appendChild(tierCell);
 
-        // Remaining stats (skip first 2 since we already added them)
-        baseStats.slice(2).forEach(stat => {
+        // Remaining stats (skip first 3 since we already added BB Score, Gini, IV)
+        baseStats.slice(3).forEach(stat => {
             const cell = createStatCell(player, stat.key, stat.decimals);
             row.appendChild(cell);
         });
