@@ -1,0 +1,105 @@
+name: Fetch MLB Data & Deploy GitHub Pages
+
+on:
+  workflow_dispatch:
+    inputs:
+      seasons:
+        description: 'Seasons to fetch (comma-separated, e.g. "2023,2024")'
+        required: true
+        default: '2023,2024'
+      min_games:
+        description: 'Minimum games threshold'
+        required: false
+        default: '15'
+      force_refetch:
+        description: 'Force re-fetch even if databases exist'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  fetch-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Parse seasons
+        id: parse
+        run: |
+          IFS=',' read -ra SEASONS <<< "${{ github.event.inputs.seasons }}"
+          echo "season1=${SEASONS[0]}" >> $GITHUB_OUTPUT
+          echo "season2=${SEASONS[1]}" >> $GITHUB_OUTPUT
+          echo "Fetching seasons: ${SEASONS[0]} and ${SEASONS[1]}"
+
+      - name: Restore cached databases
+        uses: actions/cache@v4
+        with:
+          path: |
+            data/mlb_stats_${{ steps.parse.outputs.season1 }}.db
+            data/mlb_stats_${{ steps.parse.outputs.season2 }}.db
+          key: mlb-data-${{ steps.parse.outputs.season1 }}-${{ steps.parse.outputs.season2 }}-v1
+
+      - name: Fetch Season 1 data
+        run: |
+          S1="${{ steps.parse.outputs.season1 }}"
+          DB="data/mlb_stats_${S1}.db"
+          if [ "${{ github.event.inputs.force_refetch }}" = "true" ] || [ ! -f "$DB" ] || [ "$(python -c "import sqlite3; c=sqlite3.connect('$DB'); print(c.execute('SELECT COUNT(*) FROM games WHERE data_fetched=1').fetchone()[0])" 2>/dev/null)" = "0" ]; then
+            echo "Fetching $S1 season data..."
+            python fetch_data.py --season "$S1" --db-path "$DB"
+          else
+            echo "Season $S1 data already exists, skipping fetch."
+            python -c "import sqlite3; c=sqlite3.connect('$DB'); stats=c.execute('SELECT COUNT(*) FROM games WHERE data_fetched=1').fetchone(); print(f'  Games fetched: {stats[0]}')"
+          fi
+
+      - name: Fetch Season 2 data
+        run: |
+          S2="${{ steps.parse.outputs.season2 }}"
+          DB="data/mlb_stats_${S2}.db"
+          if [ "${{ github.event.inputs.force_refetch }}" = "true" ] || [ ! -f "$DB" ] || [ "$(python -c "import sqlite3; c=sqlite3.connect('$DB'); print(c.execute('SELECT COUNT(*) FROM games WHERE data_fetched=1').fetchone()[0])" 2>/dev/null)" = "0" ]; then
+            echo "Fetching $S2 season data..."
+            python fetch_data.py --season "$S2" --db-path "$DB"
+          else
+            echo "Season $S2 data already exists, skipping fetch."
+            python -c "import sqlite3; c=sqlite3.connect('$DB'); stats=c.execute('SELECT COUNT(*) FROM games WHERE data_fetched=1').fetchone(); print(f'  Games fetched: {stats[0]}')"
+          fi
+
+      - name: Generate GitHub Pages site
+        run: |
+          S1="${{ steps.parse.outputs.season1 }}"
+          S2="${{ steps.parse.outputs.season2 }}"
+          python generate_gh_pages.py \
+            --db1 "data/mlb_stats_${S1}.db" \
+            --db2 "data/mlb_stats_${S2}.db" \
+            --label1 "$S1" \
+            --label2 "$S2" \
+            --min-games ${{ github.event.inputs.min_games }}
+
+      - name: Commit and push updated site
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/index.html
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            S1="${{ steps.parse.outputs.season1 }}"
+            S2="${{ steps.parse.outputs.season2 }}"
+            git commit -m "Update GitHub Pages: ${S1} vs ${S2} comparison data"
+            git push
+          fi
