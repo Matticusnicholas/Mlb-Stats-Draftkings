@@ -268,7 +268,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MLB Best Ball: Year-Over-Year Streakiness Analysis</title>
+<title>MLB Best Ball: Persistent Volatility Analysis</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -354,8 +354,8 @@ tr:hover td { background: #e8eef7 !important; }
 <body>
 <div class="container">
 <div class="header">
-    <h1>MLB Best Ball: Year-Over-Year Streakiness Analysis</h1>
-    <div class="sub">Do TEAR rates, boom weeks, IV, and Gini persist across time periods?</div>
+    <h1>MLB Best Ball: Persistent Volatility Analysis</h1>
+    <div class="sub">Gini + IV + USEFUL metrics: which signals persist and which are noise?</div>
     <div class="meta">
         <span id="meta-periods"></span>
         <span id="meta-type"></span>
@@ -363,6 +363,10 @@ tr:hover td { background: #e8eef7 !important; }
     </div>
 </div>
 
+<div style="display:flex;gap:10px;margin-bottom:12px;">
+    <button id="btnBatting" onclick="switchType('batting')" style="padding:10px 24px;border:2px solid var(--primary);border-radius:5px;background:var(--primary);color:white;font-weight:700;cursor:pointer;">Batting</button>
+    <button id="btnPitching" onclick="switchType('pitching')" style="padding:10px 24px;border:2px solid var(--primary);border-radius:5px;background:white;color:var(--primary);font-weight:700;cursor:pointer;">Pitching</button>
+</div>
 <div class="tabs" id="tabs">
     <div class="tab active" data-tab="overview">Overview</div>
     <div class="tab" data-tab="correlations">Persistence</div>
@@ -575,12 +579,12 @@ function renderOverview(data) {
     // Bubble chart
     const bbComponents = [
         { name: 'USEFUL PPW', weight: 25, key: 'USEFUL Pts/Week' },
-        { name: 'USEFUL %', weight: 20, key: 'USEFUL Week %' },
-        { name: 'Boom %', weight: 20, key: 'Boom Week %' },
-        { name: 'TEAR3', weight: 15, key: 'TEAR3 Rate' },
+        { name: 'Gini', weight: 25, key: 'Gini Coefficient' },
+        { name: 'USEFUL %', weight: 15, key: 'USEFUL Week %' },
         { name: 'IV', weight: 10, key: 'Implied Volatility' },
-        { name: 'Top 3 Avg', weight: 5, key: 'Top 3 Weeks Avg' },
-        { name: 'Gini', weight: 0, key: 'Gini Coefficient' },
+        { name: 'Top 3 Avg', weight: 10, key: 'Top 3 Weeks Avg' },
+        { name: 'Top 5 Conc', weight: 10, key: 'Abs Boom Rate (15+ DK)' },
+        { name: 'Boom %', weight: 5, key: 'Boom Week %' },
     ];
 
     const bubbleData = bbComponents.map(comp => {
@@ -620,18 +624,29 @@ function renderOverview(data) {
         }
     });
 
-    // Warning
-    const randomWeight = bbComponents.filter(c => {
+    // Efficiency summary
+    const persistentWeight = bbComponents.filter(c => {
         const corr = data.correlations.find(x => x.name === c.key);
-        return c.weight > 0 && (!corr || !corr.adj_r || Math.abs(corr.adj_r) < 0.3);
+        return c.weight > 0 && corr && corr.adj_r != null && Math.abs(corr.adj_r) >= 0.15;
     }).reduce((s, c) => s + c.weight, 0);
 
-    if (randomWeight > 30) {
+    const randomWeight = 100 - persistentWeight;
+    const giniCorr = data.correlations.find(c => c.name === 'Gini Coefficient');
+    const giniAdj = giniCorr ? (giniCorr.adj_r || 0).toFixed(3) : 'N/A';
+
+    if (persistentWeight >= 50) {
+        document.getElementById('overviewWarning').innerHTML = `
+            <div class="warning" style="background:#e8f5e9; border-color:#2e7d32;">
+                <div class="title" style="color:#2e7d32;">BB Score Formula: ${persistentWeight}% Signal</div>
+                <p>${persistentWeight}% of the BB Score is backed by persistent metrics.
+                Gini coefficient (talent-adjusted r=${giniAdj}, 25% weight) is the strongest single persistent signal.
+                ${randomWeight > 0 ? randomWeight + '% goes to weaker or talent-driven signals.' : ''}</p>
+            </div>`;
+    } else {
         document.getElementById('overviewWarning').innerHTML = `
             <div class="warning">
-                <div class="title">BB Score Formula Warning</div>
-                <p>${randomWeight}% of the BB Score formula weight goes to metrics that show NO persistence after talent adjustment.
-                Consider adding Gini coefficient (talent-adjusted r=${(data.correlations.find(c=>c.name==='Gini Coefficient')||{adj_r:0}).adj_r||'N/A'}) as a primary input.</p>
+                <div class="title">BB Score Formula: Only ${persistentWeight}% Signal</div>
+                <p>${randomWeight}% of the BB Score formula weight goes to metrics with low persistence after talent adjustment.</p>
             </div>`;
     }
 }
@@ -656,12 +671,12 @@ function renderCorrelations(data) {
     // Weight pie
     const bbComps = [
         { name: 'USEFUL PPW (25%)', weight: 25, key: 'USEFUL Pts/Week' },
-        { name: 'USEFUL % (20%)', weight: 20, key: 'USEFUL Week %' },
-        { name: 'Boom % (20%)', weight: 20, key: 'Boom Week %' },
-        { name: 'TEAR3 (15%)', weight: 15, key: 'TEAR3 Rate' },
+        { name: 'Gini Coeff (25%)', weight: 25, key: 'Gini Coefficient' },
+        { name: 'USEFUL % (15%)', weight: 15, key: 'USEFUL Week %' },
         { name: 'IV (10%)', weight: 10, key: 'Implied Volatility' },
-        { name: 'Top 3 Avg (5%)', weight: 5, key: 'Top 3 Weeks Avg' },
-        { name: 'Top 5 Conc (5%)', weight: 5, key: 'Top 5 Concentration' },
+        { name: 'Top 3 Avg (10%)', weight: 10, key: 'Top 3 Weeks Avg' },
+        { name: 'Top 5 Conc (10%)', weight: 10, key: 'Abs Boom Rate (15+ DK)' },
+        { name: 'Boom % (5%)', weight: 5, key: 'Boom Week %' },
     ];
     const pieColors = bbComps.map(c => {
         const corr = data.correlations.find(x => x.name === c.key);
@@ -821,6 +836,23 @@ function renderStars(data) {
     }
     starTable(d.consistent_stars, 'consistentTable');
     starTable(d.p1_only_stars, 'p1OnlyTable');
+}
+
+// ===== TYPE TOGGLE =====
+function switchType(type) {
+    if (type === 'batting') {
+        renderAll(BATTING_DATA);
+        document.getElementById('btnBatting').style.background = 'var(--primary)';
+        document.getElementById('btnBatting').style.color = 'white';
+        document.getElementById('btnPitching').style.background = 'white';
+        document.getElementById('btnPitching').style.color = 'var(--primary)';
+    } else {
+        renderAll(PITCHING_DATA);
+        document.getElementById('btnPitching').style.background = 'var(--primary)';
+        document.getElementById('btnPitching').style.color = 'white';
+        document.getElementById('btnBatting').style.background = 'white';
+        document.getElementById('btnBatting').style.color = 'var(--primary)';
+    }
 }
 
 // ===== INIT =====
