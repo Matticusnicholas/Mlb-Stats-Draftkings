@@ -308,6 +308,30 @@ def compare_metrics(
             'useful_pct_p2': m2.get('useful_weeks_pct', 0),
             'useful_ppw_p1': m1.get('useful_points_per_week', 0),
             'useful_ppw_p2': m2.get('useful_points_per_week', 0),
+            'useful_total_p1': m1.get('useful_points_total', 0),
+            'useful_total_p2': m2.get('useful_points_total', 0),
+            'useful_eff_p1': m1.get('useful_efficiency', 0),
+            'useful_eff_p2': m2.get('useful_efficiency', 0),
+            'useful_count_p1': m1.get('useful_weeks_count', 0),
+            'useful_count_p2': m2.get('useful_weeks_count', 0),
+            'wasted_p1': m1.get('wasted_points', 0),
+            'wasted_p2': m2.get('wasted_points', 0),
+            # Additional ceiling / concentration
+            'high_week_rate_p1': m1.get('high_week_rate', 0),
+            'high_week_rate_p2': m2.get('high_week_rate', 0),
+            'top5_pct_p1': m1.get('top5_weeks_pct', 0),
+            'top5_pct_p2': m2.get('top5_weeks_pct', 0),
+            'weekly_cv_p1': m1.get('weekly_cv', 0),
+            'weekly_cv_p2': m2.get('weekly_cv', 0),
+            # Raw tear counts
+            'tear2_count_p1': m1.get('tear2_count', 0),
+            'tear2_count_p2': m2.get('tear2_count', 0),
+            'tear3_count_p1': m1.get('tear3_count', 0),
+            'tear3_count_p2': m2.get('tear3_count', 0),
+            'boom_count_p1': m1.get('boom_week_count', 0),
+            'boom_count_p2': m2.get('boom_week_count', 0),
+            'high_week_count_p1': m1.get('high_week_count', 0),
+            'high_week_count_p2': m2.get('high_week_count', 0),
         })
 
     df = pd.DataFrame(rows)
@@ -333,6 +357,11 @@ def compare_metrics(
         ('Weekly Std Dev', 'std_week'),
         ('USEFUL Week %', 'useful_pct'),
         ('USEFUL Pts/Week', 'useful_ppw'),
+        ('USEFUL Total Pts', 'useful_total'),
+        ('USEFUL Efficiency', 'useful_eff'),
+        ('High Week Rate', 'high_week_rate'),
+        ('Top 5 Concentration', 'top5_pct'),
+        ('Weekly CV', 'weekly_cv'),
         ('Longest Tear', 'longest_tear'),
     ]
 
@@ -368,6 +397,183 @@ def compare_metrics(
     out("\n  *** = Strong signal   ** = Moderate signal")
     out("  Correlation > 0.5 means the trait is REPEATABLE across periods")
     out("  Correlation < 0.3 means the trait is largely RANDOM")
+
+    # =========================================================================
+    # SECTION 1B: BB SCORE COMPONENT BREAKDOWN
+    # =========================================================================
+    out("\n" + "=" * 120)
+    out("  SECTION 1B: BEST BALL SCORE COMPONENT BREAKDOWN")
+    out("  How each BB Score input (with its weight) persists across periods")
+    out("=" * 120)
+
+    # Map BB Score components to their weights and the correlation metric
+    bb_components = [
+        ('USEFUL Pts/Week', 0.25, 'useful_ppw'),
+        ('USEFUL Week %', 0.20, 'useful_pct'),
+        ('Boom Week %', 0.20, 'boom_rate'),
+        ('TEAR3 Rate', 0.15, 'tear3'),
+        ('Implied Volatility', 0.10, 'iv'),
+        ('Top 3 Weeks Avg', 0.05, 'top3_avg'),
+        ('Top 5 Concentration', 0.05, 'top5_pct'),
+    ]
+
+    out(f"\n  {'Component':<25} {'Weight':>6} {'Correlation':>12} {'Persistent?':<20} {'Impact on BB Score'}")
+    out("  " + "-" * 95)
+
+    total_weighted_persistence = 0.0
+    for comp_name, weight, prefix in bb_components:
+        corr = correlations.get(comp_name, None)
+        if corr is not None:
+            if abs(corr) >= 0.5:
+                persist = "YES - repeatable"
+            elif abs(corr) >= 0.3:
+                persist = "WEAK - partial"
+            else:
+                persist = "NO - random"
+
+            if abs(corr) >= 0.3:
+                impact = "Reliable signal"
+            else:
+                impact = "Adding noise to BB Score"
+
+            weighted = abs(corr) * weight
+            total_weighted_persistence += weighted
+            out(f"  {comp_name:<25} {weight:>5.0%} {corr:>12.3f} {persist:<20} {impact}")
+        else:
+            out(f"  {comp_name:<25} {weight:>5.0%} {'N/A':>12} {'???':<20}")
+
+    out(f"\n  WEIGHTED PERSISTENCE (sum of |corr| x weight): {total_weighted_persistence:.3f}")
+    out(f"  Max possible (all components r=1.0): 1.000")
+    out(f"  Efficiency: {total_weighted_persistence / 1.0 * 100:.1f}% of weight goes to persistent metrics")
+
+    # Breakdown: how much of BB Score weight goes to persistent vs random metrics
+    persistent_weight = 0.0
+    random_weight = 0.0
+    for comp_name, weight, prefix in bb_components:
+        corr = correlations.get(comp_name, None)
+        if corr is not None and abs(corr) >= 0.3:
+            persistent_weight += weight
+        else:
+            random_weight += weight
+
+    out(f"\n  Weight allocated to PERSISTENT metrics (|r| >= 0.3): {persistent_weight:.0%}")
+    out(f"  Weight allocated to RANDOM metrics (|r| < 0.3):      {random_weight:.0%}")
+
+    if random_weight > 0.3:
+        out(f"\n  WARNING: {random_weight:.0%} of the BB Score formula weights metrics that show")
+        out(f"  NO persistence period-over-period. These components (TEAR rates, boom %, etc.)")
+        out(f"  may add noise rather than signal to your draft rankings.")
+        out(f"  Consider re-weighting toward persistent metrics like Mean Weekly Pts,")
+        out(f"  Top 3 Weeks Avg, and Implied Volatility.")
+
+    # =========================================================================
+    # SECTION 1C: TALENT-ADJUSTED STREAKINESS
+    # =========================================================================
+    out("\n" + "=" * 120)
+    out("  SECTION 1C: TALENT-ADJUSTED STREAKINESS (Controlling for overall skill)")
+    out("  Do streaky players stay streaky BEYOND just being good hitters/pitchers?")
+    out("=" * 120)
+
+    # Residualize: regress each streakiness metric on mean_week to remove talent
+    from scipy import stats as scipy_stats
+
+    talent_adjusted = [
+        ('TEAR3 Rate', 'tear3'),
+        ('Boom Week %', 'boom_rate'),
+        ('Implied Volatility', 'iv'),
+        ('USEFUL Week %', 'useful_pct'),
+        ('USEFUL Pts/Week', 'useful_ppw'),
+        ('Weekly Std Dev', 'std_week'),
+        ('High Week Rate', 'high_week_rate'),
+        ('Top 5 Concentration', 'top5_pct'),
+    ]
+
+    out(f"\n  Method: Regress each metric on Mean Weekly Pts to remove talent,")
+    out(f"  then correlate the RESIDUALS across periods.")
+    out(f"  This isolates pure streakiness/variance ABOVE what talent would predict.\n")
+
+    out(f"  {'Metric':<25} {'Raw r':>8} {'Talent-Adj r':>13} {'Interpretation':<28}")
+    out("  " + "-" * 78)
+
+    for name, prefix in talent_adjusted:
+        col1_metric = f'{prefix}_p1'
+        col2_metric = f'{prefix}_p2'
+        col1_talent = 'mean_week_p1'
+        col2_talent = 'mean_week_p2'
+
+        valid = df[[col1_metric, col2_metric, col1_talent, col2_talent]].dropna()
+        valid = valid[
+            ((valid[col1_metric] != 0) | (valid[col2_metric] != 0)) &
+            (valid[col1_talent] > 0) & (valid[col2_talent] > 0)
+        ]
+
+        if len(valid) < 15:
+            out(f"  {name:<25} {'N/A':>8} {'N/A':>13} {'Insufficient data':<28}")
+            continue
+
+        raw_corr = valid[col1_metric].corr(valid[col2_metric])
+
+        # Residualize P1 metric on P1 talent
+        slope1, intercept1, _, _, _ = scipy_stats.linregress(valid[col1_talent], valid[col1_metric])
+        resid1 = valid[col1_metric] - (slope1 * valid[col1_talent] + intercept1)
+
+        # Residualize P2 metric on P2 talent
+        slope2, intercept2, _, _, _ = scipy_stats.linregress(valid[col2_talent], valid[col2_metric])
+        resid2 = valid[col2_metric] - (slope2 * valid[col2_talent] + intercept2)
+
+        adj_corr = resid1.corr(resid2)
+
+        if abs(adj_corr) >= 0.3:
+            interp = "PERSISTENT (true skill)"
+        elif abs(adj_corr) >= 0.15:
+            interp = "SLIGHT signal"
+        else:
+            interp = "RANDOM after talent adj"
+
+        out(f"  {name:<25} {raw_corr:>+8.3f} {adj_corr:>+13.3f} {interp:<28}")
+
+    out(f"\n  If talent-adjusted r > 0.3, the metric captures a REAL repeatable skill")
+    out(f"  beyond simply being a good player. If it drops to ~0 after adjustment,")
+    out(f"  the raw correlation was just talent in disguise.")
+
+    # =========================================================================
+    # SECTION 1D: PLAYER-LEVEL SUB-METRIC TABLE (Top 30 with all BB Score inputs)
+    # =========================================================================
+    out("\n" + "=" * 120)
+    out("  SECTION 1D: TOP 30 PLAYERS - ALL BB SCORE INPUTS SIDE-BY-SIDE")
+    out("=" * 120)
+
+    df_sorted_detail = df.sort_values('bb_score_p1', ascending=False).head(30)
+
+    out(f"\n  {'Player Name':<22} "
+        f"{'UsflPPW1':>8} {'UsflPPW2':>8} "
+        f"{'Usfl%1':>7} {'Usfl%2':>7} "
+        f"{'Boom%1':>7} {'Boom%2':>7} "
+        f"{'T3r1':>5} {'T3r2':>5} "
+        f"{'IV1':>5} {'IV2':>5} "
+        f"{'T3Avg1':>7} {'T3Avg2':>7} "
+        f"{'T5%1':>5} {'T5%2':>5}")
+    out("  " + "-" * 118)
+
+    for _, row in df_sorted_detail.iterrows():
+        out(f"  {row['player_name']:<22} "
+            f"{row['useful_ppw_p1']:>8.1f} {row['useful_ppw_p2']:>8.1f} "
+            f"{row['useful_pct_p1']:>7.1f} {row['useful_pct_p2']:>7.1f} "
+            f"{row['boom_rate_p1']:>7.1f} {row['boom_rate_p2']:>7.1f} "
+            f"{row['tear3_p1']:>5.1f} {row['tear3_p2']:>5.1f} "
+            f"{row['iv_p1']:>5.2f} {row['iv_p2']:>5.2f} "
+            f"{row['top3_avg_p1']:>7.1f} {row['top3_avg_p2']:>7.1f} "
+            f"{row['top5_pct_p1']:>5.1f} {row['top5_pct_p2']:>5.1f}")
+
+    out(f"\n  Column Key:")
+    out(f"    UsflPPW = USEFUL Points Per Week (when starting-worthy, how productive?)")
+    out(f"    Usfl%   = USEFUL Week % (how often does the player have a starting-worthy week?)")
+    out(f"    Boom%   = Boom Week Rate (90th percentile weeks)")
+    out(f"    T3r     = TEAR3 rate (3+ consecutive hot games per 100)")
+    out(f"    IV      = Implied Volatility (weekly std / league median std)")
+    out(f"    T3Avg   = Top 3 Weeks Average (typical ceiling)")
+    out(f"    T5%     = Top 5 Weeks Concentration (% of total from top 5)")
+    out(f"    1/2 suffix = {label1}/{label2}")
 
     # =========================================================================
     # SECTION 2: TOP PLAYERS COMPARISON
