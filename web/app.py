@@ -10,6 +10,7 @@ import json
 from datetime import datetime
 import tempfile
 import logging
+import threading
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -40,6 +41,20 @@ _player_cache = {
     'batting': None,
     'pitching': None,
     'combined': None
+}
+
+# Background fetch state (shared across requests)
+_fetch_state = {
+    'active': False,
+    'season': None,
+    'phase': None,        # 'schedule', 'boxscores', 'cache', 'done', 'error'
+    'progress': 0,        # 0-100
+    'total_games': 0,
+    'games_fetched': 0,
+    'errors': 0,
+    'message': '',
+    'seasons_queued': [],  # seasons still to fetch
+    'started_at': None,
 }
 
 
@@ -1205,6 +1220,316 @@ def get_cutline_all_rosters(draft_id):
         'success': True,
         'rosters': rosters
     })
+
+
+# =============================================================================
+# AUTO-FETCH: Season data detection and background fetching
+# =============================================================================
+
+REQUIRED_SEASONS = [2023, 2024]
+
+
+@app.route('/api/data-status', methods=['GET'])
+def get_data_status():
+    """
+    Check which seasons have data in the database.
+    Frontend calls this on page load to detect missing seasons.
+    """
+    try:
+        from src.database.models import Game
+        from sqlalchemy import func, extract, case
+
+        session = db.get_session()
+
+        # Query per-year game counts and fetch status
+        rows = session.query(
+            extract('year', Game.game_date).label('year'),
+            func.count(Game.game_pk).label('total_games'),
+            func.sum(case((Game.data_fetched == True, 1), else_=0)).label('fetched_games')
+        ).group_by('year').all()
+
+        session.close()
+
+        seasons = {}
+        for r in rows:
+            year = int(r.year)
+            total = int(r.total_games)
+            fetched = int(r.fetched_games)
+            seasons[year] = {
+                'total_games': total,
+                'fetched_games': fetched,
+                'complete': fetched >= total and total > 0,
+                'pct': round(fetched / total * 100, 1) if total > 0 else 0
+            }
+
+        # Determine which required seasons are missing
+        missing = []
+        for year in REQUIRED_SEASONS:
+            if year not in seasons or not seasons[year]['complete']:
+                missing.append(year)
+
+        # Check cache freshness
+        cache_exists = os.path.exists(BATTING_CACHE) and os.path.exists(PITCHING_CACHE)
+        cache_generated = None
+        if cache_exists:
+            try:
+                with open(BATTING_CACHE, 'r') as f:
+                    cache_generated = json.load(f).get('generated_at')
+            except Exception:
+                pass
+
+        return jsonify({
+            'success': True,
+            'seasons': seasons,
+            'required_seasons': REQUIRED_SEASONS,
+            'missing_seasons': missing,
+            'cache_exists': cache_exists,
+            'cache_generated': cache_generated,
+            'fetch_active': _fetch_state['active']
+        })
+
+    except Exception as e:
+        logger.error(f"Error checking data status: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/fetch-seasons', methods=['POST'])
+def fetch_seasons():
+    """
+    Start background fetching for one or more seasons.
+    Fetches schedule + boxscores from MLB Stats API, then regenerates cache.
+
+    POST body:
+        seasons: list of year ints, e.g. [2023, 2024]
+    """
+    global _fetch_state
+
+    if _fetch_state['active']:
+        return jsonify({
+            'success': False,
+            'error': 'A fetch is already in progress',
+            'state': _fetch_state
+        }), 409
+
+    data = request.get_json() or {}
+    seasons = data.get('seasons', [])
+
+    if not seasons:
+        return jsonify({'success': False, 'error': 'No seasons specified'}), 400
+
+    # Validate seasons
+    for s in seasons:
+        if not isinstance(s, int) or s < 2000 or s > 2030:
+            return jsonify({'success': False, 'error': f'Invalid season: {s}'}), 400
+
+    # Reset state
+    _fetch_state.update({
+        'active': True,
+        'season': seasons[0],
+        'phase': 'starting',
+        'progress': 0,
+        'total_games': 0,
+        'games_fetched': 0,
+        'errors': 0,
+        'message': f'Starting fetch for {len(seasons)} season(s)...',
+        'seasons_queued': list(seasons),
+        'started_at': datetime.now().isoformat(),
+    })
+
+    # Launch background thread
+    thread = threading.Thread(
+        target=_background_fetch_seasons,
+        args=(list(seasons),),
+        daemon=True
+    )
+    thread.start()
+
+    return jsonify({
+        'success': True,
+        'message': f'Background fetch started for seasons: {seasons}',
+        'state': _fetch_state
+    })
+
+
+@app.route('/api/fetch-progress', methods=['GET'])
+def fetch_progress():
+    """Poll current fetch progress."""
+    return jsonify({
+        'success': True,
+        'state': _fetch_state
+    })
+
+
+def _background_fetch_seasons(seasons):
+    """
+    Background worker that fetches schedule + boxscores for each season,
+    then regenerates the web cache. Runs in a daemon thread.
+    """
+    global _fetch_state
+
+    try:
+        from src.api.mlb_api import MLBStatsAPI
+        from src.utils.dk_calculator import DKPointsCalculator
+
+        api = MLBStatsAPI(rate_limit_delay=0.3)
+        calculator = DKPointsCalculator()
+
+        # Use a fresh DB connection for the background thread
+        bg_db = DatabaseManager(DB_PATH)
+
+        for season_year in seasons:
+            season = str(season_year)
+            _fetch_state.update({
+                'season': season_year,
+                'phase': 'schedule',
+                'progress': 0,
+                'message': f'Fetching {season} schedule...',
+                'seasons_queued': [s for s in seasons if s >= season_year],
+            })
+
+            # --- Step 1: Fetch schedule ---
+            try:
+                games = api.fetch_season_schedule(season=season, game_type="R")
+                added = bg_db.add_games(games)
+                _fetch_state['message'] = f'{season}: Found {len(games)} games, {added} new'
+                logger.info(f"Season {season}: {len(games)} games, {added} new")
+            except Exception as e:
+                logger.error(f"Error fetching schedule for {season}: {e}")
+                _fetch_state.update({
+                    'phase': 'error',
+                    'message': f'Error fetching {season} schedule: {e}'
+                })
+                continue
+
+            # --- Step 2: Fetch boxscores ---
+            _fetch_state['phase'] = 'boxscores'
+            game_pks = bg_db.get_games_to_fetch(limit=None)
+
+            # Filter to only this season's games
+            from src.database.models import Game
+            from sqlalchemy import extract
+            session = bg_db.get_session()
+            season_game_pks = set(
+                row[0] for row in session.query(Game.game_pk).filter(
+                    extract('year', Game.game_date) == season_year,
+                    Game.data_fetched == False
+                ).all()
+            )
+            session.close()
+
+            games_to_fetch = [pk for pk in game_pks if pk in season_game_pks]
+            total = len(games_to_fetch)
+            _fetch_state['total_games'] = total
+            _fetch_state['games_fetched'] = 0
+            _fetch_state['message'] = f'{season}: Fetching {total} boxscores...'
+
+            for i, game_pk in enumerate(games_to_fetch):
+                try:
+                    boxscore = api.fetch_boxscore(game_pk)
+                    player_stats = api.extract_player_stats(boxscore)
+
+                    for player_data in player_stats:
+                        dk_points = calculator.calculate_points(player_data)
+                        bg_db.add_player_game(
+                            game_pk=game_pk,
+                            player_data=player_data,
+                            dk_points=dk_points
+                        )
+
+                    bg_db.mark_game_fetched(game_pk)
+                    _fetch_state['games_fetched'] = i + 1
+                    _fetch_state['progress'] = round((i + 1) / total * 100, 1) if total > 0 else 100
+                    _fetch_state['message'] = (
+                        f'{season}: {i + 1}/{total} games '
+                        f'({_fetch_state["progress"]}%)'
+                    )
+
+                except Exception as e:
+                    _fetch_state['errors'] += 1
+                    logger.error(f"Error processing game {game_pk}: {e}")
+                    continue
+
+            logger.info(f"Season {season} complete: {_fetch_state['games_fetched']} games fetched")
+
+        # --- Step 3: Regenerate cache ---
+        _fetch_state.update({
+            'phase': 'cache',
+            'progress': 0,
+            'message': 'Regenerating Best Ball cache (this may take a few minutes)...'
+        })
+
+        _regenerate_cache()
+
+        # Invalidate in-memory cache so next request picks up new data
+        _player_cache['batting'] = None
+        _player_cache['pitching'] = None
+        _player_cache['combined'] = None
+
+        _fetch_state.update({
+            'active': False,
+            'phase': 'done',
+            'progress': 100,
+            'message': f'All seasons fetched and cache regenerated successfully!'
+        })
+
+    except Exception as e:
+        logger.error(f"Background fetch failed: {e}")
+        import traceback
+        traceback.print_exc()
+        _fetch_state.update({
+            'active': False,
+            'phase': 'error',
+            'message': f'Fetch failed: {e}'
+        })
+
+
+def _regenerate_cache():
+    """
+    Regenerate the web cache JSON files using the full precalculate pipeline.
+    Called after new season data is fetched.
+    """
+    try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+
+        cache_db = DatabaseManager(DB_PATH)
+        weekly_analyzer = WeeklyAnalyzer(cache_db)
+
+        # Batting
+        _fetch_state['message'] = 'Regenerating batting cache...'
+        batting_players = weekly_analyzer.get_top_bestball_players(
+            stats_type='batting', min_games=10, limit=500
+        )
+
+        cache_data = {
+            'generated_at': datetime.now().isoformat(),
+            'count': len(batting_players),
+            'players': batting_players
+        }
+        with open(BATTING_CACHE, 'w') as f:
+            json.dump(cache_data, f)
+        logger.info(f"Regenerated batting cache: {len(batting_players)} players")
+
+        # Pitching
+        _fetch_state['message'] = 'Regenerating pitching cache...'
+        pitching_players = weekly_analyzer.get_top_bestball_players(
+            stats_type='pitching', min_games=10, limit=500
+        )
+
+        cache_data = {
+            'generated_at': datetime.now().isoformat(),
+            'count': len(pitching_players),
+            'players': pitching_players
+        }
+        with open(PITCHING_CACHE, 'w') as f:
+            json.dump(cache_data, f)
+        logger.info(f"Regenerated pitching cache: {len(pitching_players)} players")
+
+        _fetch_state['message'] = 'Cache regeneration complete!'
+
+    except Exception as e:
+        logger.error(f"Cache regeneration failed: {e}")
+        _fetch_state['message'] = f'Cache regeneration failed: {e}'
+        raise
 
 
 if __name__ == '__main__':

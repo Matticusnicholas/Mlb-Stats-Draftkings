@@ -22,6 +22,26 @@
             <a href="/cutline-draft" style="color: white; background: #8b0000; text-decoration: none; padding: 10px 20px; border-radius: 5px; font-weight: 600;">Cutline Draft</a>
         </nav>
 
+        <!-- Data Status Banner (shown when seasons are missing) -->
+        <div id="data-status-banner" class="data-banner hidden">
+            <div class="data-banner-content">
+                <div class="data-banner-icon">&#9888;</div>
+                <div class="data-banner-text">
+                    <strong id="banner-title">Missing Season Data</strong>
+                    <p id="banner-message">Checking for 2023 and 2024 data...</p>
+                </div>
+                <div class="data-banner-actions">
+                    <button id="fetch-btn" class="btn-fetch" onclick="startFetchMissing()">Fetch Missing Data</button>
+                </div>
+            </div>
+            <div id="fetch-progress-container" class="fetch-progress hidden">
+                <div class="fetch-progress-bar-bg">
+                    <div id="fetch-progress-bar" class="fetch-progress-bar" style="width: 0%"></div>
+                </div>
+                <p id="fetch-progress-text" class="fetch-progress-text">Starting...</p>
+            </div>
+        </div>
+
         <!-- Filters -->
         <div class="filters-section">
             <div class="filter-group">

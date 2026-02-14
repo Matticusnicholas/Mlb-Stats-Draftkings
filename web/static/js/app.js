@@ -54,6 +54,7 @@ tableHeaders.addEventListener('click', (e) => {
 loadDatabaseStats();
 updateScoringInfo();
 updateTableHeaders();  // Initialize table headers with correct columns
+checkDataStatus();     // Check if 2023/2024 data exists
 
 /**
  * Update scoring system info in footer
@@ -398,4 +399,172 @@ function showLoading(show) {
     } else {
         loading.classList.add('hidden');
     }
+}
+
+// =============================================================================
+// AUTO-FETCH: Detect missing season data and offer to fetch it
+// =============================================================================
+
+let _missingSeasons = [];
+let _fetchPollInterval = null;
+
+/**
+ * Check if required seasons (2023, 2024) have data in the database.
+ * Shows a banner if data is missing.
+ */
+async function checkDataStatus() {
+    const banner = document.getElementById('data-status-banner');
+    if (!banner) return;
+
+    try {
+        const response = await fetch('/api/data-status');
+        const data = await response.json();
+
+        if (!data.success) return;
+
+        // If a fetch is already running, show progress immediately
+        if (data.fetch_active) {
+            banner.classList.remove('hidden');
+            document.getElementById('banner-title').textContent = 'Fetching Season Data...';
+            document.getElementById('banner-message').textContent = 'A data fetch is already in progress.';
+            document.getElementById('fetch-btn').disabled = true;
+            document.getElementById('fetch-btn').textContent = 'Fetching...';
+            document.getElementById('fetch-progress-container').classList.remove('hidden');
+            startProgressPolling();
+            return;
+        }
+
+        _missingSeasons = data.missing_seasons || [];
+
+        if (_missingSeasons.length === 0) {
+            // All data present - hide banner or show success briefly
+            banner.classList.add('hidden');
+            return;
+        }
+
+        // Show banner with missing seasons
+        banner.classList.remove('hidden');
+        const seasonList = _missingSeasons.join(' and ');
+        document.getElementById('banner-title').textContent = `Missing ${seasonList} Season Data`;
+        document.getElementById('banner-message').textContent =
+            `The ${seasonList} MLB season data has not been fetched yet. ` +
+            `Click "Fetch Missing Data" to automatically download it from the MLB Stats API. ` +
+            `This takes ~10-15 minutes per season but only needs to happen once.`;
+        document.getElementById('fetch-btn').disabled = false;
+        document.getElementById('fetch-btn').textContent = `Fetch ${seasonList} Data`;
+
+    } catch (error) {
+        console.error('Error checking data status:', error);
+    }
+}
+
+/**
+ * Start fetching missing seasons (called by the banner button).
+ */
+async function startFetchMissing() {
+    if (_missingSeasons.length === 0) return;
+
+    const fetchBtn = document.getElementById('fetch-btn');
+    const progressContainer = document.getElementById('fetch-progress-container');
+
+    fetchBtn.disabled = true;
+    fetchBtn.textContent = 'Fetching...';
+    progressContainer.classList.remove('hidden');
+    document.getElementById('fetch-progress-text').textContent = 'Starting fetch...';
+
+    try {
+        const response = await fetch('/api/fetch-seasons', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ seasons: _missingSeasons })
+        });
+
+        const data = await response.json();
+
+        if (!data.success) {
+            document.getElementById('fetch-progress-text').textContent = `Error: ${data.error}`;
+            fetchBtn.disabled = false;
+            fetchBtn.textContent = 'Retry';
+            return;
+        }
+
+        // Start polling for progress
+        startProgressPolling();
+
+    } catch (error) {
+        console.error('Error starting fetch:', error);
+        document.getElementById('fetch-progress-text').textContent = `Error: ${error.message}`;
+        fetchBtn.disabled = false;
+        fetchBtn.textContent = 'Retry';
+    }
+}
+
+/**
+ * Poll the server for fetch progress every 2 seconds.
+ */
+function startProgressPolling() {
+    if (_fetchPollInterval) clearInterval(_fetchPollInterval);
+
+    _fetchPollInterval = setInterval(async () => {
+        try {
+            const response = await fetch('/api/fetch-progress');
+            const data = await response.json();
+
+            if (!data.success) return;
+
+            const state = data.state;
+            const progressBar = document.getElementById('fetch-progress-bar');
+            const progressText = document.getElementById('fetch-progress-text');
+            const banner = document.getElementById('data-status-banner');
+            const bannerTitle = document.getElementById('banner-title');
+
+            // Update progress bar
+            progressBar.style.width = state.progress + '%';
+            progressText.textContent = state.message;
+
+            // Update title based on phase
+            if (state.phase === 'schedule') {
+                bannerTitle.textContent = `Fetching ${state.season} Schedule...`;
+            } else if (state.phase === 'boxscores') {
+                bannerTitle.textContent = `Fetching ${state.season} Game Data (${state.games_fetched}/${state.total_games})`;
+            } else if (state.phase === 'cache') {
+                bannerTitle.textContent = 'Regenerating Analytics Cache...';
+                progressBar.style.width = '100%';
+            }
+
+            // Check if done
+            if (state.phase === 'done') {
+                clearInterval(_fetchPollInterval);
+                _fetchPollInterval = null;
+
+                bannerTitle.textContent = 'Data Fetch Complete!';
+                progressBar.style.width = '100%';
+                progressText.textContent = state.message;
+                banner.classList.add('success');
+                banner.querySelector('.data-banner-icon').innerHTML = '&#10003;';
+
+                // Auto-hide banner after 5 seconds and reload data
+                setTimeout(() => {
+                    banner.classList.add('hidden');
+                    // Invalidate and reload player data
+                    loadPlayers();
+                    loadDatabaseStats();
+                }, 5000);
+            }
+
+            if (state.phase === 'error' && !state.active) {
+                clearInterval(_fetchPollInterval);
+                _fetchPollInterval = null;
+
+                bannerTitle.textContent = 'Fetch Error';
+                progressText.textContent = state.message;
+                const fetchBtn = document.getElementById('fetch-btn');
+                fetchBtn.disabled = false;
+                fetchBtn.textContent = 'Retry';
+            }
+
+        } catch (error) {
+            console.error('Error polling progress:', error);
+        }
+    }, 2000);
 }
