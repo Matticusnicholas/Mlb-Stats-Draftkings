@@ -260,7 +260,7 @@ def compare_metrics(
 
     if len(common_ids) < 10:
         out("\n  Not enough common players to run comparison analysis.")
-        return
+        return pd.DataFrame(), {}, pd.DataFrame()
 
     # Build comparison DataFrame
     rows = []
@@ -332,6 +332,12 @@ def compare_metrics(
             'boom_count_p2': m2.get('boom_week_count', 0),
             'high_week_count_p1': m1.get('high_week_count', 0),
             'high_week_count_p2': m2.get('high_week_count', 0),
+            # Gini coefficient (burst compression / point inequality)
+            'gini_p1': m1.get('gini_coefficient', 0),
+            'gini_p2': m2.get('gini_coefficient', 0),
+            # Game-level CV
+            'game_cv_p1': m1.get('game_cv', 0),
+            'game_cv_p2': m2.get('game_cv', 0),
         })
 
     df = pd.DataFrame(rows)
@@ -346,6 +352,8 @@ def compare_metrics(
 
     correlation_metrics = [
         ('Best Ball Score', 'bb_score'),
+        ('Gini Coefficient', 'gini'),
+        ('Game CV', 'game_cv'),
         ('TEAR2 Rate', 'tear2'),
         ('TEAR3 Rate', 'tear3'),
         ('TEAR4 Rate', 'tear4'),
@@ -407,14 +415,15 @@ def compare_metrics(
     out("=" * 120)
 
     # Map BB Score components to their weights and the correlation metric
+    # Weights match weekly_analyzer.py: Gini 25% co-dominant, TEAR3 dropped, boom 5%
     bb_components = [
         ('USEFUL Pts/Week', 0.25, 'useful_ppw'),
-        ('USEFUL Week %', 0.20, 'useful_pct'),
-        ('Boom Week %', 0.20, 'boom_rate'),
-        ('TEAR3 Rate', 0.15, 'tear3'),
+        ('Gini Coefficient', 0.25, 'gini'),
+        ('USEFUL Week %', 0.15, 'useful_pct'),
         ('Implied Volatility', 0.10, 'iv'),
-        ('Top 3 Weeks Avg', 0.05, 'top3_avg'),
-        ('Top 5 Concentration', 0.05, 'top5_pct'),
+        ('Top 3 Weeks Avg', 0.10, 'top3_avg'),
+        ('Top 5 Concentration', 0.10, 'top5_pct'),
+        ('Boom Week %', 0.05, 'boom_rate'),
     ]
 
     out(f"\n  {'Component':<25} {'Weight':>6} {'Correlation':>12} {'Persistent?':<20} {'Impact on BB Score'}")
@@ -478,6 +487,8 @@ def compare_metrics(
     from scipy import stats as scipy_stats
 
     talent_adjusted = [
+        ('Gini Coefficient', 'gini'),
+        ('Game CV', 'game_cv'),
         ('TEAR3 Rate', 'tear3'),
         ('Boom Week %', 'boom_rate'),
         ('Implied Volatility', 'iv'),
@@ -547,32 +558,32 @@ def compare_metrics(
 
     out(f"\n  {'Player Name':<22} "
         f"{'UsflPPW1':>8} {'UsflPPW2':>8} "
+        f"{'Gini1':>6} {'Gini2':>6} "
         f"{'Usfl%1':>7} {'Usfl%2':>7} "
-        f"{'Boom%1':>7} {'Boom%2':>7} "
-        f"{'T3r1':>5} {'T3r2':>5} "
         f"{'IV1':>5} {'IV2':>5} "
         f"{'T3Avg1':>7} {'T3Avg2':>7} "
-        f"{'T5%1':>5} {'T5%2':>5}")
+        f"{'T5%1':>5} {'T5%2':>5} "
+        f"{'Boom%1':>6} {'Boom%2':>6}")
     out("  " + "-" * 118)
 
     for _, row in df_sorted_detail.iterrows():
         out(f"  {row['player_name']:<22} "
             f"{row['useful_ppw_p1']:>8.1f} {row['useful_ppw_p2']:>8.1f} "
+            f"{row['gini_p1']:>6.3f} {row['gini_p2']:>6.3f} "
             f"{row['useful_pct_p1']:>7.1f} {row['useful_pct_p2']:>7.1f} "
-            f"{row['boom_rate_p1']:>7.1f} {row['boom_rate_p2']:>7.1f} "
-            f"{row['tear3_p1']:>5.1f} {row['tear3_p2']:>5.1f} "
             f"{row['iv_p1']:>5.2f} {row['iv_p2']:>5.2f} "
             f"{row['top3_avg_p1']:>7.1f} {row['top3_avg_p2']:>7.1f} "
-            f"{row['top5_pct_p1']:>5.1f} {row['top5_pct_p2']:>5.1f}")
+            f"{row['top5_pct_p1']:>5.1f} {row['top5_pct_p2']:>5.1f} "
+            f"{row['boom_rate_p1']:>6.1f} {row['boom_rate_p2']:>6.1f}")
 
     out(f"\n  Column Key:")
     out(f"    UsflPPW = USEFUL Points Per Week (when starting-worthy, how productive?)")
+    out(f"    Gini    = Gini Coefficient (point compression / burst tendency, 0-1)")
     out(f"    Usfl%   = USEFUL Week % (how often does the player have a starting-worthy week?)")
-    out(f"    Boom%   = Boom Week Rate (90th percentile weeks)")
-    out(f"    T3r     = TEAR3 rate (3+ consecutive hot games per 100)")
     out(f"    IV      = Implied Volatility (weekly std / league median std)")
     out(f"    T3Avg   = Top 3 Weeks Average (typical ceiling)")
     out(f"    T5%     = Top 5 Weeks Concentration (% of total from top 5)")
+    out(f"    Boom%   = Boom Week Rate (90th percentile weeks)")
     out(f"    1/2 suffix = {label1}/{label2}")
 
     # =========================================================================
@@ -770,29 +781,172 @@ def compare_metrics(
 
     if consistent_stars:
         out(f"\n  CONSISTENT STARS (Top {top_n} in both periods):")
-        out(f"  {'Player Name':<26} {'BB1':>6} {'BB2':>6} {'T3r1':>6} {'T3r2':>6} {'IV1':>6} {'IV2':>6}")
+        out(f"  {'Player Name':<26} {'BB1':>6} {'BB2':>6} {'Gini1':>6} {'Gini2':>6} {'IV1':>6} {'IV2':>6}")
         out("  " + "-" * 65)
         for pid in sorted(consistent_stars, key=lambda x: metrics1[x].get('bestball_score', 0), reverse=True):
             row = df[df['player_id'] == pid].iloc[0]
             out(f"  {row['player_name']:<26} {row['bb_score_p1']:>6.1f} {row['bb_score_p2']:>6.1f} "
-                f"{row['tear3_p1']:>6.1f} {row['tear3_p2']:>6.1f} "
+                f"{row['gini_p1']:>6.3f} {row['gini_p2']:>6.3f} "
                 f"{row['iv_p1']:>6.2f} {row['iv_p2']:>6.2f}")
 
     if p1_only_stars:
         out(f"\n  {label1}-ONLY STARS (Top {top_n} in {label1}, dropped in {label2}):")
-        out(f"  {'Player Name':<26} {'BB1':>6} {'BB2':>6} {'T3r1':>6} {'T3r2':>6} {'IV1':>6} {'IV2':>6}")
+        out(f"  {'Player Name':<26} {'BB1':>6} {'BB2':>6} {'Gini1':>6} {'Gini2':>6} {'IV1':>6} {'IV2':>6}")
         out("  " + "-" * 65)
         for pid in sorted(p1_only_stars, key=lambda x: metrics1[x].get('bestball_score', 0), reverse=True):
             row = df[df['player_id'] == pid].iloc[0]
             out(f"  {row['player_name']:<26} {row['bb_score_p1']:>6.1f} {row['bb_score_p2']:>6.1f} "
-                f"{row['tear3_p1']:>6.1f} {row['tear3_p2']:>6.1f} "
+                f"{row['gini_p1']:>6.3f} {row['gini_p2']:>6.3f} "
                 f"{row['iv_p1']:>6.2f} {row['iv_p2']:>6.2f}")
 
     # =========================================================================
-    # SECTION 8: SUMMARY & KEY FINDINGS
+    # SECTION 8: PERSISTENT VOLATILITY IDENTIFICATION
+    # =========================================================================
+    # This is the core identification engine: which players have a STABLE burst
+    # profile across periods vs. which ones were just noisy in one sample?
+    out("\n" + "=" * 120)
+    out("  SECTION 8: PERSISTENT VOLATILITY IDENTIFICATION")
+    out("  Which players have burst profiles that are a TRAIT, not a fluke?")
+    out("=" * 120)
+
+    # For each player, compute a "persistence score" based on how stable their
+    # burst metrics are across periods. A player with Gini 0.55 in both periods
+    # is fundamentally different from one with 0.55 then 0.35.
+    #
+    # Persistence score = weighted combination of:
+    #   - Gini stability (absolute delta, inverted — smaller delta = more persistent)
+    #   - IV stability
+    #   - Whether they stay above burst thresholds in both periods
+
+    # Thresholds for "burst player" (above-average volatility)
+    gini_burst_thresh = df['gini_p1'].median()  # Median Gini as baseline
+    iv_burst_thresh = 1.0  # IV of 1.0 = league average
+
+    persist_rows = []
+    for _, row in df.iterrows():
+        gini1, gini2 = row['gini_p1'], row['gini_p2']
+        iv1, iv2 = row['iv_p1'], row['iv_p2']
+        boom1, boom2 = row['boom_rate_p1'], row['boom_rate_p2']
+        cv1, cv2 = row.get('game_cv_p1', 0), row.get('game_cv_p2', 0)
+
+        # Gini stability: how much did their point compression change?
+        gini_delta = abs(gini2 - gini1)
+        gini_avg = (gini1 + gini2) / 2
+
+        # IV stability
+        iv_delta = abs(iv2 - iv1)
+        iv_avg = (iv1 + iv2) / 2
+
+        # Boom stability
+        boom_delta = abs(boom2 - boom1)
+        boom_avg = (boom1 + boom2) / 2
+
+        # Game CV stability
+        cv_delta = abs(cv2 - cv1) if cv1 > 0 and cv2 > 0 else 999
+        cv_avg = (cv1 + cv2) / 2
+
+        # Persistence score: reward LOW deltas and HIGH averages
+        # Scale deltas to 0-100 where 0 delta = 100, large delta = 0
+        gini_stability = max(0, 100 - gini_delta * 500)  # 0.2 delta = 0 score
+        iv_stability = max(0, 100 - iv_delta * 100)       # 1.0 delta = 0 score
+        boom_stability = max(0, 100 - boom_delta * 5)     # 20% delta = 0 score
+
+        # Level: how volatile ARE they (average across periods)
+        gini_level = min(100, max(0, (gini_avg - 0.3) * 250))  # Same scale as BB Score
+        iv_level = min(100, max(0, (iv_avg - 0.5) * 100))
+
+        # Combined persistence score
+        # Must be BOTH stable AND elevated to be flagged
+        stability = (gini_stability * 0.50 + iv_stability * 0.30 + boom_stability * 0.20)
+        level = (gini_level * 0.60 + iv_level * 0.40)
+
+        # Persistent volatility = stable burst profile that's actually elevated
+        pv_score = (stability * 0.50 + level * 0.50)
+
+        # Classify
+        gini_persistent = gini1 >= gini_burst_thresh and gini2 >= gini_burst_thresh
+        iv_elevated = iv1 >= iv_burst_thresh and iv2 >= iv_burst_thresh
+
+        if gini_persistent and iv_elevated and gini_delta < 0.10:
+            pv_flag = "PERSISTENT"
+        elif gini_persistent and gini_delta < 0.12:
+            pv_flag = "LIKELY"
+        elif gini_delta < 0.08:
+            pv_flag = "STABLE-LOW"  # Stable but not volatile — consistent floor guy
+        elif gini_delta > 0.15:
+            pv_flag = "UNSTABLE"
+        else:
+            pv_flag = "MIXED"
+
+        persist_rows.append({
+            'player_id': row['player_id'],
+            'player_name': row['player_name'],
+            'gini1': gini1, 'gini2': gini2, 'gini_delta': gini_delta,
+            'iv1': iv1, 'iv2': iv2, 'iv_delta': iv_delta,
+            'boom1': boom1, 'boom2': boom2,
+            'bb1': row['bb_score_p1'], 'bb2': row['bb_score_p2'],
+            'pv_score': pv_score,
+            'pv_flag': pv_flag,
+            'stability': stability,
+            'level': level,
+        })
+
+    pv_df = pd.DataFrame(persist_rows)
+
+    # Show persistent volatility players (the real best ball targets)
+    persistent = pv_df[pv_df['pv_flag'] == 'PERSISTENT'].sort_values('pv_score', ascending=False)
+    likely = pv_df[pv_df['pv_flag'] == 'LIKELY'].sort_values('pv_score', ascending=False)
+    unstable = pv_df[pv_df['pv_flag'] == 'UNSTABLE'].sort_values('pv_score', ascending=False)
+
+    out(f"\n  Classification criteria:")
+    out(f"    PERSISTENT = Gini above median in BOTH periods + IV >= 1.0 in BOTH + Gini delta < 0.10")
+    out(f"    LIKELY     = Gini above median in BOTH periods + Gini delta < 0.12")
+    out(f"    STABLE-LOW = Gini delta < 0.08 but below burst threshold (floor guys)")
+    out(f"    UNSTABLE   = Gini delta > 0.15 (one-sample noise)")
+    out(f"    MIXED      = Everything else")
+    out(f"\n  Median Gini threshold: {gini_burst_thresh:.3f}")
+
+    flag_counts = pv_df['pv_flag'].value_counts()
+    out(f"\n  Distribution:")
+    for flag in ['PERSISTENT', 'LIKELY', 'STABLE-LOW', 'MIXED', 'UNSTABLE']:
+        cnt = flag_counts.get(flag, 0)
+        pct = cnt / len(pv_df) * 100 if len(pv_df) > 0 else 0
+        out(f"    {flag:<12} {cnt:>4} players ({pct:>5.1f}%)")
+
+    if len(persistent) > 0:
+        out(f"\n  PERSISTENT VOLATILITY TARGETS ({len(persistent)} players):")
+        out(f"  These players have burst profiles that are a repeatable TRAIT.")
+        out(f"  {'Player Name':<26} {'Gini1':>6} {'Gini2':>6} {'GDelta':>7} "
+            f"{'IV1':>5} {'IV2':>5} {'BB1':>6} {'BB2':>6} {'PV':>5}")
+        out("  " + "-" * 85)
+        for _, row in persistent.head(30).iterrows():
+            out(f"  {row['player_name']:<26} {row['gini1']:>6.3f} {row['gini2']:>6.3f} {row['gini_delta']:>7.3f} "
+                f"{row['iv1']:>5.2f} {row['iv2']:>5.2f} {row['bb1']:>6.1f} {row['bb2']:>6.1f} {row['pv_score']:>5.1f}")
+
+    if len(likely) > 0:
+        out(f"\n  LIKELY PERSISTENT ({len(likely)} players):")
+        out(f"  Burst profile stable but IV not elevated in both periods.")
+        out(f"  {'Player Name':<26} {'Gini1':>6} {'Gini2':>6} {'GDelta':>7} "
+            f"{'IV1':>5} {'IV2':>5} {'BB1':>6} {'BB2':>6} {'PV':>5}")
+        out("  " + "-" * 85)
+        for _, row in likely.head(20).iterrows():
+            out(f"  {row['player_name']:<26} {row['gini1']:>6.3f} {row['gini2']:>6.3f} {row['gini_delta']:>7.3f} "
+                f"{row['iv1']:>5.2f} {row['iv2']:>5.2f} {row['bb1']:>6.1f} {row['bb2']:>6.1f} {row['pv_score']:>5.1f}")
+
+    if len(unstable) > 0:
+        out(f"\n  UNSTABLE PROFILES ({len(unstable)} players) - One-period noise, NOT reliable:")
+        out(f"  {'Player Name':<26} {'Gini1':>6} {'Gini2':>6} {'GDelta':>7} "
+            f"{'IV1':>5} {'IV2':>5} {'BB1':>6} {'BB2':>6}")
+        out("  " + "-" * 80)
+        for _, row in unstable.head(15).iterrows():
+            out(f"  {row['player_name']:<26} {row['gini1']:>6.3f} {row['gini2']:>6.3f} {row['gini_delta']:>7.3f} "
+                f"{row['iv1']:>5.2f} {row['iv2']:>5.2f} {row['bb1']:>6.1f} {row['bb2']:>6.1f}")
+
+    # =========================================================================
+    # SECTION 9: SUMMARY & KEY FINDINGS
     # =========================================================================
     out("\n" + "=" * 120)
-    out("  SECTION 8: KEY FINDINGS & TAKEAWAYS")
+    out("  SECTION 9: KEY FINDINGS & TAKEAWAYS")
     out("=" * 120)
 
     out("\n  METRIC PERSISTENCE RANKING (most to least predictive):")
@@ -809,22 +963,165 @@ def compare_metrics(
         out(f"\n  OVERALL PERSISTENCE INDEX: {avg_corr:.3f}")
         if avg_corr >= 0.5:
             out("  Verdict: Player profiles are HIGHLY PERSISTENT across periods.")
-            out("  Best Ball strategy: Trust historical TEAR/boom metrics for draft decisions.")
+            out("  Best Ball strategy: Trust historical Gini/IV metrics for draft decisions.")
         elif avg_corr >= 0.3:
             out("  Verdict: Player profiles show MODERATE persistence.")
             out("  Best Ball strategy: Use historical metrics as a guide but expect some regression.")
         else:
             out("  Verdict: Player profiles show LOW persistence. Streakiness is partly random.")
-            out("  Best Ball strategy: Don't over-rely on single-season TEAR/boom metrics.")
+            out("  Best Ball strategy: Don't over-rely on single-season metrics.")
+
+    # Persistent volatility summary
+    n_persistent = len(pv_df[pv_df['pv_flag'] == 'PERSISTENT'])
+    n_likely = len(pv_df[pv_df['pv_flag'] == 'LIKELY'])
+    out(f"\n  PERSISTENT VOLATILITY SUMMARY:")
+    out(f"    {n_persistent} players flagged PERSISTENT (burst profile is a repeatable trait)")
+    out(f"    {n_likely} players flagged LIKELY (strong signal, needs confirmation)")
+    out(f"    Target these players in best ball drafts — their spike weeks are real.")
 
     out("\n" + "=" * 120)
 
     # Export the comparison data
     if output_path:
-        df.to_csv(output_path, index=False)
+        # Merge PV flags into main export
+        pv_export = pv_df[['player_id', 'pv_score', 'pv_flag', 'gini_delta', 'stability', 'level']]
+        df_export = df.merge(pv_export, on='player_id', how='left')
+        df_export.to_csv(output_path, index=False)
         out(f"\n  Full comparison data exported to: {output_path}")
+        out(f"  (Includes pv_score, pv_flag columns for persistent volatility)")
 
-    return df, correlations
+    return df, correlations, pv_df
+
+
+def compare_three_periods(
+    metrics1: Dict[int, Dict],
+    metrics2: Dict[int, Dict],
+    metrics3: Dict[int, Dict],
+    label1: str,
+    label2: str,
+    label3: str,
+    stats_type: str,
+    output_path: str = None,
+):
+    """
+    3-way persistent volatility identification across three periods.
+
+    Runs pairwise comparisons (1v2, 2v3) then cross-references:
+    players flagged PERSISTENT or LIKELY in BOTH pairs are the real targets.
+    Also identifies players who only show up in 2v3 (emerging burst profile).
+    """
+    print(f"\n  Running pairwise comparison: {label1} vs {label2}...")
+    df_12, corr_12, pv_12 = compare_metrics(metrics1, metrics2, label1, label2, stats_type)
+
+    print(f"\n  Running pairwise comparison: {label2} vs {label3}...")
+    df_23, corr_23, pv_23 = compare_metrics(metrics2, metrics3, label2, label3, stats_type)
+
+    if len(pv_12) == 0 or len(pv_23) == 0:
+        print(f"\n  Cannot run 3-way comparison: insufficient data in one or more periods.")
+        print(f"    {label1} vs {label2}: {len(pv_12)} players")
+        print(f"    {label2} vs {label3}: {len(pv_23)} players")
+        print(f"\n  Ensure databases have data. To fetch historical data:")
+        print(f"    python fetch_data.py --season 2023 --db-path data/mlb_stats_2023.db")
+        print(f"    python fetch_data.py --season 2024 --db-path data/mlb_stats_2024.db")
+        return pd.DataFrame()
+
+    # Cross-reference PV flags
+    print("\n" + "=" * 120)
+    print(f"  3-WAY PERSISTENT VOLATILITY: {label1} -> {label2} -> {label3}")
+    print("  Players whose burst profile is confirmed across ALL three periods")
+    print("=" * 120)
+
+    # Merge PV results from both comparisons by player_id
+    pv_12_slim = pv_12[['player_id', 'player_name', 'pv_flag', 'pv_score',
+                         'gini1', 'gini2', 'gini_delta', 'iv1', 'iv2']].copy()
+    pv_12_slim.columns = ['player_id', 'player_name',
+                           'pv_flag_12', 'pv_score_12',
+                           'gini_p1', 'gini_p2', 'gini_delta_12', 'iv_p1', 'iv_p2']
+
+    pv_23_slim = pv_23[['player_id', 'pv_flag', 'pv_score',
+                         'gini1', 'gini2', 'gini_delta', 'iv1', 'iv2']].copy()
+    pv_23_slim.columns = ['player_id',
+                           'pv_flag_23', 'pv_score_23',
+                           'gini_p2_check', 'gini_p3', 'gini_delta_23', 'iv_p2_check', 'iv_p3']
+
+    merged = pv_12_slim.merge(pv_23_slim, on='player_id', how='inner')
+
+    # 3-way classification
+    target_flags = {'PERSISTENT', 'LIKELY'}
+
+    confirmed = merged[
+        merged['pv_flag_12'].isin(target_flags) &
+        merged['pv_flag_23'].isin(target_flags)
+    ].copy()
+    confirmed['combined_pv'] = (confirmed['pv_score_12'] + confirmed['pv_score_23']) / 2
+    confirmed = confirmed.sort_values('combined_pv', ascending=False)
+
+    # Players who only emerge in the recent pair (new burst profiles)
+    emerging = merged[
+        ~merged['pv_flag_12'].isin(target_flags) &
+        merged['pv_flag_23'].isin(target_flags)
+    ].copy()
+    emerging['combined_pv'] = emerging['pv_score_23']
+    emerging = emerging.sort_values('combined_pv', ascending=False)
+
+    # Players who lost their burst profile (fading)
+    fading = merged[
+        merged['pv_flag_12'].isin(target_flags) &
+        ~merged['pv_flag_23'].isin(target_flags)
+    ].copy()
+    fading = fading.sort_values('pv_score_12', ascending=False)
+
+    print(f"\n  Players in all 3 periods: {len(merged)}")
+    print(f"  CONFIRMED persistent (flagged in BOTH pairs): {len(confirmed)}")
+    print(f"  EMERGING (new burst profile in {label2}->{label3}): {len(emerging)}")
+    print(f"  FADING (lost burst profile in {label2}->{label3}): {len(fading)}")
+
+    if len(confirmed) > 0:
+        print(f"\n  CONFIRMED PERSISTENT VOLATILITY TARGETS:")
+        print(f"  These players maintained their burst profile across all 3 periods.")
+        print(f"  {'Player Name':<26} {'G_'+ label1[:2]:>6} {'G_'+ label2[:2]:>6} {'G_'+ label3[:2]:>6} "
+              f"{'GD12':>5} {'GD23':>5} "
+              f"{'IV_'+ label1[:2]:>5} {'IV_'+ label3[:2]:>5} "
+              f"{'PV12':>5} {'PV23':>5} {'Flag12':<11} {'Flag23':<11}")
+        print("  " + "-" * 110)
+        for _, row in confirmed.head(30).iterrows():
+            print(f"  {row['player_name']:<26} "
+                  f"{row['gini_p1']:>6.3f} {row['gini_p2']:>6.3f} {row['gini_p3']:>6.3f} "
+                  f"{row['gini_delta_12']:>5.3f} {row['gini_delta_23']:>5.3f} "
+                  f"{row['iv_p1']:>5.2f} {row['iv_p3']:>5.2f} "
+                  f"{row['pv_score_12']:>5.1f} {row['pv_score_23']:>5.1f} "
+                  f"{row['pv_flag_12']:<11} {row['pv_flag_23']:<11}")
+
+    if len(emerging) > 0:
+        print(f"\n  EMERGING BURST PROFILES (New in {label2}->{label3}):")
+        print(f"  {'Player Name':<26} {'G_'+ label1[:2]:>6} {'G_'+ label2[:2]:>6} {'G_'+ label3[:2]:>6} "
+              f"{'GD12':>5} {'GD23':>5} {'Flag12':<11} {'Flag23':<11}")
+        print("  " + "-" * 95)
+        for _, row in emerging.head(15).iterrows():
+            print(f"  {row['player_name']:<26} "
+                  f"{row['gini_p1']:>6.3f} {row['gini_p2']:>6.3f} {row['gini_p3']:>6.3f} "
+                  f"{row['gini_delta_12']:>5.3f} {row['gini_delta_23']:>5.3f} "
+                  f"{row['pv_flag_12']:<11} {row['pv_flag_23']:<11}")
+
+    if len(fading) > 0:
+        print(f"\n  FADING BURST PROFILES (Lost in {label2}->{label3}):")
+        print(f"  {'Player Name':<26} {'G_'+ label1[:2]:>6} {'G_'+ label2[:2]:>6} {'G_'+ label3[:2]:>6} "
+              f"{'GD12':>5} {'GD23':>5} {'Flag12':<11} {'Flag23':<11}")
+        print("  " + "-" * 95)
+        for _, row in fading.head(15).iterrows():
+            print(f"  {row['player_name']:<26} "
+                  f"{row['gini_p1']:>6.3f} {row['gini_p2']:>6.3f} {row['gini_p3']:>6.3f} "
+                  f"{row['gini_delta_12']:>5.3f} {row['gini_delta_23']:>5.3f} "
+                  f"{row['pv_flag_12']:<11} {row['pv_flag_23']:<11}")
+
+    print("\n" + "=" * 120)
+
+    # Export 3-way data
+    if output_path:
+        merged.to_csv(output_path, index=False)
+        print(f"\n  3-way comparison data exported to: {output_path}")
+
+    return merged
 
 
 def main():
@@ -856,9 +1153,26 @@ def main():
         help="Label for second period (e.g., '2024')"
     )
     parser.add_argument(
+        "--db3",
+        type=str,
+        default=None,
+        help="Path to third period database for 3-way persistence (e.g., data/mlb_stats.db for 2025)"
+    )
+    parser.add_argument(
+        "--label3",
+        type=str,
+        default="Period 3",
+        help="Label for third period (e.g., '2025')"
+    )
+    parser.add_argument(
         "--split-season",
         action="store_true",
         help="Split single database into first/second half instead of using two databases"
+    )
+    parser.add_argument(
+        "--split-db3",
+        action="store_true",
+        help="Split --db3 into H1/H2 and use H1 as the third period (for mid-season 2025)"
     )
     parser.add_argument(
         "--stats-type",
@@ -911,22 +1225,61 @@ def main():
     metrics2 = compute_player_metrics(db2_path, args.stats_type, min_games=args.min_games)
     print(f"  -> {len(metrics2)} qualifying players")
 
-    compare_metrics(
-        metrics1, metrics2,
-        args.label1, args.label2,
-        args.stats_type,
-        output_path=args.export,
-    )
+    if args.db3:
+        # 3-way comparison mode
+        db3_path = args.db3
+        if args.split_db3:
+            # Split db3 into halves, use H1
+            h1_path_3 = args.db3.replace('.db', '_h1.db')
+            h2_path_3 = args.db3.replace('.db', '_h2.db')
+            print(f"\n  Splitting {args.db3} into two halves (using H1 for 3-way)...")
+            split_database_by_half(args.db3, h1_path_3, h2_path_3)
+            db3_path = h1_path_3
+
+        print(f"\n  Computing {args.stats_type} metrics for {args.label3}...")
+        metrics3 = compute_player_metrics(db3_path, args.stats_type, min_games=args.min_games)
+        print(f"  -> {len(metrics3)} qualifying players")
+
+        # Run 2-way comparison first (still produces the full report)
+        compare_metrics(
+            metrics1, metrics2,
+            args.label1, args.label2,
+            args.stats_type,
+            output_path=None,  # Don't export 2-way, export 3-way instead
+        )
+
+        # Then run 3-way cross-reference
+        compare_three_periods(
+            metrics1, metrics2, metrics3,
+            args.label1, args.label2, args.label3,
+            args.stats_type,
+            output_path=args.export,
+        )
+    else:
+        # Standard 2-way comparison
+        compare_metrics(
+            metrics1, metrics2,
+            args.label1, args.label2,
+            args.stats_type,
+            output_path=args.export,
+        )
 
     # Clean up temp databases if we split
     if args.split_season:
         print(f"\n  Temp databases preserved at {db1_path} and {db2_path}")
         print(f"  (Delete manually if not needed)")
 
-    print("\n  To compare actual 2023 vs 2024 seasons:")
-    print("    1. python fetch_data.py --season 2023 --db-path data/mlb_stats_2023.db")
-    print("    2. python fetch_data.py --season 2024 --db-path data/mlb_stats_2024.db")
-    print("    3. python compare_seasons.py --db1 data/mlb_stats_2023.db --db2 data/mlb_stats_2024.db --label1 2023 --label2 2024")
+    print("\n  Usage examples:")
+    print("    # 2-way: Compare 2023 vs 2024:")
+    print("    python compare_seasons.py --db1 data/mlb_stats_2023.db --db2 data/mlb_stats_2024.db --label1 2023 --label2 2024")
+    print()
+    print("    # 3-way: 2023 vs 2024 vs 2025 (full persistent volatility identification):")
+    print("    python compare_seasons.py --db1 data/mlb_stats_2023.db --db2 data/mlb_stats_2024.db \\")
+    print("      --db3 data/mlb_stats.db --label1 2023 --label2 2024 --label3 2025")
+    print()
+    print("    # 3-way with 2025 H1 only (mid-season check):")
+    print("    python compare_seasons.py --db1 data/mlb_stats_2023.db --db2 data/mlb_stats_2024.db \\")
+    print("      --db3 data/mlb_stats.db --split-db3 --label1 2023 --label2 2024 --label3 '2025-H1'")
     print()
 
 
